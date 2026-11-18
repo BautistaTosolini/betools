@@ -1,0 +1,28 @@
+/* Ajustes de la versión web sobre los estilos de la app de escritorio */
+.web-layout { grid-template-columns: 320px 16px minmax(0, 1fr); }
+.web-layout > .sidebar { grid-column: 1; }
+.web-layout > .center { grid-column: 3; }
+.web-list { padding: 0 14px 18px; overflow-y: auto; flex: 1; }
+.web-list .session { margin-left: 0; }
+.menu-toggle { display: none; font-size: 20px; }
+.sidebar-backdrop { display: none; }
+
+/* Pantallas angostas (celular/tablet): el selector se abre como panel sobre la terminal. */
+@media (max-width: 800px) {
+  .app.web { padding: 0 8px 8px; }
+  .page-header { padding: 10px 2px; gap: 8px; flex-wrap: wrap; }
+  .page-header h1 { font-size: 20px; }
+  .page-sub { display: none; }
+  .menu-toggle { display: inline-block; }
+  .page-actions button { padding: 4px 10px; }
+  .web-layout { grid-template-columns: minmax(0, 1fr); }
+  .web-layout > .center { grid-column: 1; }
+  .web-layout > .sidebar {
+    position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; width: min(340px, 86vw);
+    transform: translateX(-102%); transition: transform 0.18s ease;
+  }
+  .web-layout > .sidebar.open { transform: none; }
+  .sidebar-backdrop { display: block; position: fixed; inset: 0; z-index: 24; background: rgba(0, 0, 0, 0.5); }
+  .center-header .grip { display: none; }
+  .card-header h2.center-summary { font-size: 17px; }
+}

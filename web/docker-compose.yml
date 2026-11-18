@@ -1,0 +1,35 @@
+# clawhip web en la Raspberry Pi (arm64). Desde esta carpeta:
+#   openssl rand -base64 32 > master.key && chmod 600 master.key
+#   PUID=$(id -u) PGID=$(id -g) docker compose up -d
+# Sin autenticación: pensado para una red aislada.
+services:
+  clawhip:
+    image: clawhip-web:arm64
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+      platforms: ["linux/arm64"]
+    container_name: clawhip
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      CLAWHIP_USER: "${USER:-pi}"
+      CLAWHIP_HOME: "${HOME}"
+    volumes:
+      # Tu home en la misma ruta: mismo login de Claude (~/.claude), mismas sesiones y proyectos.
+      - "${HOME}:${HOME}"
+      - clawhip-data:/data
+      # Misma zona horaria que la Pi.
+      - /etc/localtime:/etc/localtime:ro
+    secrets:
+      - clawhip_master_key
+
+secrets:
+  clawhip_master_key:
+    file: ./master.key
+
+volumes:
+  clawhip-data:

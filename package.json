@@ -1,0 +1,76 @@
+{
+  "name": "clawhip",
+  "version": "0.1.5",
+  "private": true,
+  "description": "Desktop app to manage multiple Claude Code sessions",
+  "main": "out/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "dist": "npm run build && electron-builder --linux deb",
+    "build:web": "vite build -c web/vite.config.ts && vite build -c web/vite.server.config.ts",
+    "start:web": "node web-dist/server.mjs"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  },
+  "author": {
+    "name": "clawhip"
+  },
+  "homepage": "https://localhost/clawhip",
+  "build": {
+    "appId": "local.clawhip.app",
+    "productName": "clawhip",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ],
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "icon": "resources/icon-512.png",
+      "category": "Development",
+      "executableName": "clawhip",
+      "synopsis": "Sesiones de Claude Code en una sola ventana",
+      "maintainer": "clawhip <clawhip@localhost>",
+      "syncDesktopName": true
+    }
+  },
+  "desktopName": "clawhip.desktop"
+}
