@@ -1,7 +1,7 @@
 import * as pty from 'node-pty'
 import { existsSync } from 'node:fs'
 import { claudeBin, transcriptExists } from './claude-paths'
-import { buildSettings } from './status-tracker'
+import { buildSettings, userStatusLine } from './status-tracker'
 import type { ResolvedEnv } from './env-core'
 import type { Session } from '../shared/types'
 
@@ -51,11 +51,11 @@ export interface PtyEvents {
 // Instrucción para Claude cuando la sesión tiene variables con secretos.
 function secretsPrompt(names: string[]): string {
   return [
-    `Esta sesión tiene variables de entorno con valores sensibles: ${names.join(', ')}.`,
-    'Úsalas solo por referencia en los comandos (por ejemplo "$NOMBRE"). Nunca imprimas, muestres,',
-    'registres, copies a archivos ni incluyas en respuestas su valor, ni ejecutes comandos cuyo fin sea',
-    'mostrarlo (echo, printenv, env, set, cat de /proc/*/environ, etc.). Si una tarea requiere ver el',
-    'valor, detente y pídeselo al usuario.'
+    `This session has environment variables with sensitive values: ${names.join(', ')}.`,
+    'Use them only by reference in commands (for example "$NAME"). Never print, display, log, copy to',
+    'files or include their values in replies, and never run commands whose purpose is to show them',
+    '(echo, printenv, env, set, cat /proc/*/environ, etc.). If a task requires seeing the value, stop',
+    'and ask the user for it.'
   ].join(' ')
 }
 
@@ -90,7 +90,7 @@ export class PtyManager {
     }
     if (!existsSync(session.cwd)) {
       // La carpeta de trabajo se movió o se borró: se avisa en la terminal en vez de fallar.
-      this.events.onData(session.id, `\r\n\x1b[33mLa carpeta de trabajo ya no existe: ${session.cwd}\x1b[0m\r\n`)
+      this.events.onData(session.id, `\r\n\x1b[33mThe working directory no longer exists: ${session.cwd}\x1b[0m\r\n`)
       this.events.onExit(session.id, 1)
       return null
     }
@@ -114,7 +114,7 @@ export class PtyManager {
       const lines = resolved.errors.map((e) => `  · ${e}`).join('\r\n')
       this.events.onData(
         session.id,
-        `\x1b[33mNo se pudieron cargar algunas variables de entorno (la sesión arranca sin ellas):\r\n${lines}\x1b[0m\r\n\r\n`
+        `\x1b[33mSome environment variables could not be loaded (the session starts without them):\r\n${lines}\x1b[0m\r\n\r\n`
       )
     }
     this.spawn(session, size.cols, size.rows, resolved)
@@ -145,7 +145,8 @@ export class PtyManager {
         CLAUDE_CODE_NO_FLICKER: '1',
         // Frames atómicos (DEC 2026), que xterm.js 6 soporta.
         CLAUDE_CODE_FORCE_SYNC_OUTPUT: '1',
-        CLAWHIP_STATUS_FILE: statusFile
+        CLAWHIP_STATUS_FILE: statusFile,
+        BETOOLS_USER_STATUSLINE: userStatusLine()
       }
     })
 

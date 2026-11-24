@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { onReset, subscribe } from '../pty-bus'
+import { registerTerm } from '../term-registry'
+import { getZoom, useZoom } from '../zoom'
 
 const api = window.clawhip
 
@@ -9,11 +11,14 @@ interface Props {
   // Clave del pty: el id de la sesión (Claude) o "shell:<id>" (terminal).
   id: string
   visible: boolean
+  // Sesión seleccionada aunque la pestaña no se vea (p. ej. está en Rendered): el proceso se lanza igual
+  // y la terminal se mantiene medida (oculta con visibility) para lanzarlo con el tamaño correcto.
+  active?: boolean
 }
 
 // Una terminal por sesión. Se crea una vez y se oculta (no se destruye) al cambiar de sesión.
-// El pty se lanza recién la primera vez que la sesión se hace visible (arranque lazy).
-export function TerminalView({ id, visible }: Props) {
+// El pty se lanza recién la primera vez que la sesión se selecciona (arranque lazy).
+export function TerminalView({ id, visible, active = visible }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<{ term: Terminal; fit: FitAddon } | null>(null)
   const attachedRef = useRef(false)
@@ -22,11 +27,11 @@ export function TerminalView({ id, visible }: Props) {
   useEffect(() => {
     const term = new Terminal({
       fontFamily: '"JetBrains Mono", "Fira Code", "DejaVu Sans Mono", monospace',
-      fontSize: 13,
+      fontSize: Math.round(13 * getZoom('chat')),
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 5000,
-      theme: { background: '#161616' }
+      theme: { background: '#0f0f11' }
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -58,6 +63,7 @@ export function TerminalView({ id, visible }: Props) {
       return true
     })
 
+    const unregister = registerTerm(id, term)
     const unsub = subscribe(
       id,
       (data) => term.write(data),
@@ -88,6 +94,7 @@ export function TerminalView({ id, visible }: Props) {
       cancelAnimationFrame(raf)
       ro.disconnect()
       unsub()
+      unregister()
       offReset()
       inputSub.dispose()
       term.dispose()
@@ -95,8 +102,22 @@ export function TerminalView({ id, visible }: Props) {
     }
   }, [id])
 
+  // Zoom del chat: cambia el tamaño de letra y se reacomoda la grilla (Claude redibuja con el tamaño nuevo).
+  const chatZoom = useZoom('chat')
   useEffect(() => {
-    if (!visible) return
+    const t = termRef.current
+    const size = Math.round(13 * chatZoom)
+    if (!t || t.term.options.fontSize === size) return
+    t.term.options.fontSize = size
+    const el = containerRef.current
+    if (!el || el.clientWidth === 0) return
+    const { cols, rows } = t.term
+    t.fit.fit()
+    if (attachedRef.current && (t.term.cols !== cols || t.term.rows !== rows)) api.resize(id, t.term.cols, t.term.rows)
+  }, [chatZoom, id])
+
+  useEffect(() => {
+    if (!active && !visible) return
     const raf = requestAnimationFrame(() => {
       const t = termRef.current
       if (!t) return
@@ -107,10 +128,10 @@ export function TerminalView({ id, visible }: Props) {
       } else {
         api.resize(id, t.term.cols, t.term.rows)
       }
-      t.term.focus()
+      if (visible) t.term.focus()
     })
     return () => cancelAnimationFrame(raf)
-  }, [visible, id])
+  }, [visible, active, id])
 
   const restart = () => {
     const t = termRef.current
@@ -122,16 +143,19 @@ export function TerminalView({ id, visible }: Props) {
   }
 
   return (
-    <div className="terminal-wrap" style={{ display: visible ? 'flex' : 'none' }}>
+    <div
+      className="terminal-wrap"
+      style={visible ? { display: 'flex' } : active ? { display: 'flex', visibility: 'hidden', pointerEvents: 'none' } : { display: 'none' }}
+    >
       <div className="terminal" ref={containerRef} />
       {exitCode !== null && (
         <div className="exit-banner">
           {id.startsWith('shell:') ? (
-            <span>La terminal se cerró (código {exitCode}).</span>
+            <span>The terminal closed (code {exitCode}).</span>
           ) : (
-            <span>Claude terminó (código {exitCode}). La sesión sigue guardada.</span>
+            <span>Claude exited (code {exitCode}). The session is still saved.</span>
           )}
-          <button onClick={restart}>{id.startsWith('shell:') ? 'Abrir de nuevo' : 'Reanudar'}</button>
+          <button onClick={restart}>{id.startsWith('shell:') ? 'Open again' : 'Resume'}</button>
         </div>
       )}
     </div>

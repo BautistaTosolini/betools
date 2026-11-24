@@ -25,10 +25,10 @@ export class LocalSecrets implements LocalStore {
   // En Linux, sin un llavero (GNOME Keyring/KWallet) Electron cae a "basic_text": una clave fija,
   // equivalente a texto plano. En ese caso no se guarda nada.
   assertSecureBackend(): void {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('El cifrado del sistema no está disponible.')
+    if (!safeStorage.isEncryptionAvailable()) throw new Error('System encryption is not available.')
     const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'os'
     if (backend === 'basic_text' || backend === 'unknown') {
-      throw new Error('No hay un llavero del sistema (GNOME Keyring/KWallet) disponible: no se guardan valores sin cifrado real.')
+      throw new Error('No system keyring (GNOME Keyring/KWallet) is available: values are not stored without real encryption.')
     }
   }
 

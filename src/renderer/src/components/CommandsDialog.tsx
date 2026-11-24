@@ -32,17 +32,17 @@ export function CommandsDialog({ folder, onSaved, onClose }: Props) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <h2>
-          Comandos de <span style={{ color: folder.color }}>{folder.name}</span>
+          Commands for <span style={{ color: folder.color }}>{folder.name}</span>
         </h2>
         <p className="muted small">
-          Se corren con ▶ Comandos en la pestaña Terminal de cualquier sesión de la carpeta, con sus variables de entorno. Para
-          AWS SSO, define <code>AWS_PROFILE</code> como variable visible de la carpeta y guarda <code>aws sso login</code>. No
-          escribas secretos acá: usa variables (<code>$NOMBRE</code>).
+          They run from ▶ Commands in the Terminal tab of any session in the folder, with its environment variables. For
+          AWS SSO, set <code>AWS_PROFILE</code> as a visible folder variable and save <code>aws sso login</code>. Do not
+          write secrets here: use variables (<code>$NAME</code>).
         </p>
         <ul className="cmd-list">
           {rows.map((r) => (
             <li key={r.id}>
-              <input value={r.name} placeholder="Nombre" onChange={(e) => update(r.id, { name: e.target.value })} />
+              <input value={r.name} placeholder="Name" onChange={(e) => update(r.id, { name: e.target.value })} />
               <input
                 className="mono"
                 value={r.command}
@@ -50,20 +50,20 @@ export function CommandsDialog({ folder, onSaved, onClose }: Props) {
                 spellCheck={false}
                 onChange={(e) => update(r.id, { command: e.target.value })}
               />
-              <button className="icon-btn" title="Quitar" onClick={() => setRows(rows.filter((x) => x.id !== r.id))}>
+              <button className="icon-btn" title="Remove" onClick={() => setRows(rows.filter((x) => x.id !== r.id))}>
                 ×
               </button>
             </li>
           ))}
         </ul>
         <button onClick={() => setRows([...rows, { id: newId(), name: '', command: '' }])}>
-          <span className="plus">+</span> Agregar comando
+          <span className="plus">+</span> Add command
         </button>
         {error && <p className="error">{error}</p>}
         <div className="actions">
-          <button onClick={onClose}>Cancelar</button>
+          <button onClick={onClose}>Cancel</button>
           <button className="primary" onClick={save}>
-            Guardar
+            Save
           </button>
         </div>
       </div>

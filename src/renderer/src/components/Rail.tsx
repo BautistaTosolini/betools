@@ -20,7 +20,7 @@ interface Props {
 export function Rail({ side, label, onOpen, sessions = [], folders = [], selectedId, status = {}, titles = {}, onSelect, badge }: Props) {
   return (
     <aside className={`card rail ${side}`}>
-      <button className="icon-btn rail-open" title={`Mostrar ${label.toLowerCase()}`} onClick={onOpen}>
+      <button className="icon-btn rail-open" title={`Show ${label.toLowerCase()}`} onClick={onOpen}>
         {side === 'left' ? '»' : '«'}
       </button>
       <div className="rail-items">
@@ -41,7 +41,7 @@ export function Rail({ side, label, onOpen, sessions = [], folders = [], selecte
           )
         })}
       </div>
-      <button className="rail-label" onClick={onOpen} title={`Mostrar ${label.toLowerCase()}`}>
+      <button className="rail-label" onClick={onOpen} title={`Show ${label.toLowerCase()}`}>
         {label}
         {!!badge && <span className="rail-badge">{badge}</span>}
       </button>

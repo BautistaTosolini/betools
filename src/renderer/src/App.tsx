@@ -8,6 +8,10 @@ import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ImportDialog } from './components/ImportDialog'
 import { Kebab } from './components/Kebab'
 import { Rail } from './components/Rail'
+import { UsageBar } from './components/UsageBar'
+import { ConversationView } from './components/ConversationView'
+import { ZoomControl } from './components/ZoomControl'
+import { stepZoom, zoomKeyDir } from './zoom'
 import { EnvDialog } from './components/EnvDialog'
 import { CommandsDialog } from './components/CommandsDialog'
 import type { EnvScope } from '../../shared/types'
@@ -49,6 +53,8 @@ function saveWidth(key: string, v: number): void {
     // sin storage: no pasa nada
   }
 }
+type Tab = 'rendered' | 'shell' | 'claude'
+const TAB_ORDER: Tab[] = ['rendered', 'shell', 'claude']
 const clamp = (v: number) => Math.min(600, Math.max(160, v))
 const RAIL_W = 44
 
@@ -63,10 +69,13 @@ export function App() {
   // undefined = cerrado; null = carpeta nueva; Folder = editar
   const [folderEdit, setFolderEdit] = useState<Folder | null | undefined>(undefined)
   // Pestaña activa por sesión y terminales de shell ya abiertas (quedan montadas).
-  const [tabs, setTabs] = useState<Record<string, 'claude' | 'shell'>>({})
+  // Pestaña por defecto: Rendered. Orden: Rendered → Terminal → CLI.
+  const [tabs, setTabs] = useState<Record<string, Tab>>({})
+  const [pending, setPending] = useState<Set<string>>(new Set())
   const [shellOpen, setShellOpen] = useState<Set<string>>(new Set())
   const [commandsFor, setCommandsFor] = useState<Folder | null>(null)
-  const showTab = (id: string, tab: 'claude' | 'shell') => {
+  const tabOf = (id: string): Tab => tabs[id] ?? 'rendered'
+  const showTab = (id: string, tab: Tab) => {
     setTabs((t) => ({ ...t, [id]: tab }))
     if (tab === 'shell') setShellOpen((s) => (s.has(id) ? s : new Set(s).add(id)))
   }
@@ -110,7 +119,17 @@ export function App() {
     // Selección desde afuera (clic en una notificación o en la bandeja).
     const offSelect = api.onSelect((id) => setSelectedId(id))
     const offTitle = api.onTitle((id, t) => setTitles((prev) => ({ ...prev, [id]: t })))
+    api.pendingRestarts().then((ids) => setPending(new Set(ids)))
+    const offPending = api.onPendingRestart((id, on) =>
+      setPending((prev) => {
+        const next = new Set(prev)
+        if (on) next.add(id)
+        else next.delete(id)
+        return next
+      })
+    )
     return () => {
+      offPending()
       offStatus()
       offSelect()
       offTitle()
@@ -140,11 +159,20 @@ export function App() {
   // En captura para ganarle a xterm; Ctrl+número no tiene uso en Claude Code.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Zoom: Ctrl +/−/0 toda la ventana; con Shift, solo el chat.
+      const dir = zoomKeyDir(e)
+      if (dir !== null) {
+        e.preventDefault()
+        e.stopPropagation()
+        stepZoom(e.shiftKey ? 'chat' : 'app', dir)
+        return
+      }
       if (!e.ctrlKey || e.altKey) return
       if (e.key === '`' && selectedId) {
         e.preventDefault()
         e.stopPropagation()
-        showTab(selectedId, (tabs[selectedId] ?? 'claude') === 'claude' ? 'shell' : 'claude')
+        const i = TAB_ORDER.indexOf(tabOf(selectedId))
+        showTab(selectedId, TAB_ORDER[(i + (e.shiftKey ? TAB_ORDER.length - 1 : 1)) % TAB_ORDER.length])
         return
       }
       if (e.key === 'Tab' && ordered.length > 1) {
@@ -171,6 +199,19 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [ordered, sessions, folders, selectedId, select, tabs])
 
+  // Ctrl+rueda: sobre la columna central, zoom del chat; en el resto, de toda la ventana.
+  useEffect(() => {
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey || e.deltaY === 0) return
+      e.preventDefault()
+      e.stopPropagation()
+      const inChat = (e.target as HTMLElement | null)?.closest?.('.terminals')
+      stepZoom(inChat ? 'chat' : 'app', e.deltaY < 0 ? 1 : -1)
+    }
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => window.removeEventListener('wheel', onWheel, { capture: true })
+  }, [])
+
   const create = async (cwd: string, name: string, title: string) => {
     const s = await api.createSession(cwd, name, title)
     setNewIn(undefined)
@@ -190,7 +231,7 @@ export function App() {
     const s = sessions.find((x) => x.id === id)
     if (!s) return
     const ok = window.confirm(
-      `¿Cerrar la sesión "${titles[id] ?? s.name}"?\n\nSe termina el proceso y sale de la lista. El historial de Claude no se borra; se puede retomar con claude --resume ${s.id}.`
+      `Close the session "${titles[id] ?? s.name}"?\n\nThe process stops and the session leaves the list. Claude's history is not deleted; you can resume it with claude --resume ${s.id}.`
     )
     if (!ok) return
     await api.closeSession(id)
@@ -220,22 +261,28 @@ export function App() {
   return (
     <div className="app">
       <header className="page-header">
-        <h1>clawhip</h1>
-        <span className="page-sub">
-          {sessions.length} sesiones · {folders.length} carpetas
-          {workingCount > 0 && <> · <span className="txt-working">{workingCount} trabajando</span></>}
-          {waitingCount > 0 && <> · <span className="txt-waiting">{waitingCount} esperan tu respuesta</span></>}
-        </span>
+        <div className="brand">
+          <span className="brand-mark" />
+          <h1>betools</h1>
+        </div>
+        {workingCount > 0 && <span className="pill working">{workingCount} working</span>}
+        {waitingCount > 0 && <span className="pill waiting">{waitingCount} need input</span>}
+        {/* Centrada sobre la columna de la terminal (mismos anchos que la grilla, +1 px del separador); con mínimos
+            para no pisar el nombre ni los botones cuando un panel está cerrado o angosto. */}
+        <div className="usage-slot" style={{ left: Math.max((leftOpen ? leftW : RAIL_W) + 1, 200), right: Math.max((rightOpen ? rightW : RAIL_W) + 1, 250) }}>
+          <UsageBar sessionId={selectedId} />
+        </div>
         <div className="page-actions">
-          <button onClick={() => setShowImport(true)}>Importar sesión</button>
-          <button className="primary" onClick={() => setFolderEdit(null)}>
-            <span className="plus">+</span> Nueva carpeta
+          <ZoomControl />
+          <button className="ghost" onClick={() => setShowImport(true)}>Import session</button>
+          <button className="ghost" onClick={() => setFolderEdit(null)}>
+            <span className="plus">+</span> New folder
           </button>
         </div>
       </header>
 
       <div className="layout" style={{
-          gridTemplateColumns: `${leftOpen ? leftW : RAIL_W}px 16px minmax(0, 1fr) 16px ${rightOpen ? rightW : RAIL_W}px`
+          gridTemplateColumns: `${leftOpen ? leftW : RAIL_W}px 1px minmax(0, 1fr) 1px ${rightOpen ? rightW : RAIL_W}px`
         }}>
         {leftOpen ? (
           <Sidebar
@@ -260,9 +307,9 @@ export function App() {
               await refresh()
             }}
             onFolderCommands={(f) => setCommandsFor(f)}
-            onFolderEnv={(f) => setEnvFor({ title: `Variables de la carpeta ${f.name}`, scope: { kind: 'folder', id: f.id } })}
+            onFolderEnv={(f) => setEnvFor({ title: `Variables for folder ${f.name}`, scope: { kind: 'folder', id: f.id } })}
             onDeleteFolder={async (f) => {
-              if (!window.confirm(`¿Borrar la carpeta "${f.name}"?\n\nSus sesiones no se cierran: pasan a "Sin carpeta".`)) return
+              if (!window.confirm(`Delete the folder "${f.name}"?\n\nIts sessions stay open and move to "No folder".`)) return
               await api.deleteFolder(f.id)
               if (focusId === f.id) setFocusId(null)
               await refresh()
@@ -271,7 +318,7 @@ export function App() {
         ) : (
           <Rail
             side="left"
-            label={focused ? focused.name : 'Sesiones'}
+            label={focused ? focused.name : 'Sessions'}
             onOpen={() => setLeftOpen(true)}
             sessions={ordered}
             folders={folders}
@@ -301,7 +348,7 @@ export function App() {
               <div className="center-title">
                 <div className="center-line">
                   {selTitle.ticket && (
-                    <span className="ticket" style={{ background: selColor, color: textOn(selColor) }}>
+                    <span className="ticket">
                       {selTitle.ticket}
                     </span>
                   )}
@@ -310,58 +357,62 @@ export function App() {
                 <div className="center-meta">
                   {selFolder && <span className="folder-tag">{selFolder.name}</span>}
                   <span>{selected.cwd.replace(/^\/home\/[^/]+/, '~')}</span>
+                  {pending.has(selected.id) && (
+                    <span className="txt-waiting" title="Environment variables changed while Claude was busy">
+                      ⟳ restarts when Claude finishes
+                    </span>
+                  )}
                 </div>
               </div>
               <Kebab
                 items={[
                   {
-                    label: 'Variables de entorno…',
+                    label: 'Environment variables…',
                     onClick: () =>
                       setEnvFor({
-                        title: `Variables de ${selTitle.ticket ?? selTitle.summary ?? selected.name}`,
+                        title: `Variables for ${selTitle.ticket ?? selTitle.summary ?? selected.name}`,
                         scope: { kind: 'session', id: selected.id },
                         sessionId: selected.id
                       })
                   },
                   {
-                    label: 'Reiniciar sesión',
+                    label: 'Restart session',
                     onClick: () => {
-                      if (window.confirm('¿Reiniciar la sesión?\n\nSe retoma con --resume; si Claude estaba trabajando, esa tarea se corta.'))
+                      if (window.confirm('Restart the session?\n\nIt resumes with --resume; if Claude was working, that task is interrupted.'))
                         api.restartSession(selected.id)
                     }
                   },
-                  { label: 'Abrir carpeta de trabajo', onClick: () => api.openArtifact(selected.cwd) },
-                  { label: 'Copiar ID de sesión', onClick: () => api.writeClipboard(selected.id) },
-                  { label: 'Copiar comando de resume', onClick: () => api.writeClipboard(`claude --resume ${selected.id}`) },
-                  { label: 'Cerrar sesión', onClick: () => close(selected.id), danger: true }
+                  { label: 'Open working directory', onClick: () => api.openArtifact(selected.cwd) },
+                  { label: 'Copy session ID', onClick: () => api.writeClipboard(selected.id) },
+                  { label: 'Copy resume command', onClick: () => api.writeClipboard(`claude --resume ${selected.id}`) },
+                  { label: 'Close session', onClick: () => close(selected.id), danger: true }
                 ]}
               />
             </header>
           ) : (
             <header className="card-header">
               <span className="grip">⠿</span>
-              <h2>Sesión</h2>
+              <h2>Session</h2>
             </header>
           )}
           {selected && (
             <div className="tabbar">
-              <button className={`tab ${(tabs[selected.id] ?? 'claude') === 'claude' ? 'on' : ''}`} onClick={() => showTab(selected.id, 'claude')}>
-                Claude
-              </button>
-              <button className={`tab ${tabs[selected.id] === 'shell' ? 'on' : ''}`} onClick={() => showTab(selected.id, 'shell')} title="Ctrl+` alterna">
-                Terminal
-              </button>
+              {TAB_ORDER.map((t) => (
+                <button key={t} className={`tab ${tabOf(selected.id) === t ? 'on' : ''}`} onClick={() => showTab(selected.id, t)} title="Ctrl+` cycles tabs">
+                  {t === 'rendered' ? 'Rendered' : t === 'shell' ? 'Terminal' : 'CLI'}
+                </button>
+              ))}
               <span style={{ flex: 1 }} />
               {selFolder && (
                 <Kebab
-                  title="Comandos guardados de la carpeta"
-                  label="▶ Comandos"
+                  title="Saved folder commands"
+                  label="▶ Commands"
                   items={[
                     ...(selFolder.commands ?? []).map((c) => ({
                       label: c.name ? `${c.name}  ·  ${c.command}` : c.command,
                       onClick: () => runCommand(selected.id, c.command)
                     })),
-                    { label: 'Editar comandos de la carpeta…', onClick: () => setCommandsFor(selFolder) }
+                    { label: 'Edit folder commands…', onClick: () => setCommandsFor(selFolder) }
                   ]}
                 />
               )}
@@ -369,18 +420,28 @@ export function App() {
           )}
           <div className="terminals">
             {sessions.map((s) => (
-              <TerminalView key={s.id} id={s.id} visible={s.id === selectedId && (tabs[s.id] ?? 'claude') === 'claude'} />
+              <TerminalView key={s.id} id={s.id} visible={s.id === selectedId && tabOf(s.id) === 'claude'} active={s.id === selectedId} />
             ))}
             {sessions
               .filter((s) => shellOpen.has(s.id))
               .map((s) => (
-                <TerminalView key={'shell:' + s.id} id={'shell:' + s.id} visible={s.id === selectedId && tabs[s.id] === 'shell'} />
+                <TerminalView key={'shell:' + s.id} id={'shell:' + s.id} visible={s.id === selectedId && tabOf(s.id) === 'shell'} />
               ))}
+            {selected && (
+              <ConversationView
+                key={selected.id}
+                id={selected.id}
+                active
+                visible={tabOf(selected.id) === 'rendered'}
+                status={status[selected.id] ?? 'stopped'}
+                onReply={() => showTab(selected.id, 'claude')}
+              />
+            )}
             {!selected && (
               <div className="placeholder">
-                <p>No hay ninguna sesión seleccionada.</p>
+                <p>No session selected.</p>
                 <button className="primary" onClick={() => setFolderEdit(null)}>
-                  <span className="plus">+</span> Crear una carpeta de cliente
+                  <span className="plus">+</span> Create a client folder
                 </button>
               </div>
             )}
@@ -402,7 +463,7 @@ export function App() {
         {rightOpen ? (
           <ArtifactsPanel session={selected} onCollapse={() => setRightOpen(false)} />
         ) : (
-          <Rail side="right" label="Artefactos" onOpen={() => setRightOpen(true)} />
+          <Rail side="right" label="Artifacts" onOpen={() => setRightOpen(true)} />
         )}
       </div>
       {showImport && <ImportDialog onImport={importSession} onCancel={() => setShowImport(false)} />}

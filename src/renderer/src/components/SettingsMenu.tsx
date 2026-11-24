@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import type { Settings } from '../../../shared/types'
 
 const OPTIONS: { key: keyof Settings; label: string; hint: string }[] = [
-  { key: 'autostart', label: 'Abrir al iniciar sesión', hint: 'Arranca oculta en la bandeja' },
-  { key: 'closeToTray', label: 'Cerrar a la bandeja', hint: 'La X oculta la ventana; las sesiones siguen' },
-  { key: 'notifications', label: 'Notificaciones', hint: 'Cuando una sesión termina o pide permiso' },
-  { key: 'eagerStart', label: 'Levantar todas al abrir', hint: 'Si no, cada una arranca al seleccionarla' }
+  { key: 'autostart', label: 'Open at login', hint: 'Starts hidden in the tray' },
+  { key: 'closeToTray', label: 'Close to tray', hint: 'The X hides the window; sessions keep running' },
+  { key: 'notifications', label: 'Notifications', hint: 'When a session finishes or asks for permission' },
+  { key: 'eagerStart', label: 'Start all on launch', hint: 'Otherwise each one starts when selected' }
 ]
 
 export function SettingsMenu() {
@@ -19,7 +19,7 @@ export function SettingsMenu() {
   return (
     <>
       <div className="settings">
-        <div className="menu-title">Ajustes</div>
+        <div className="menu-title">Settings</div>
         {OPTIONS.map((o) => (
           <label key={o.key} className="check">
             <input
@@ -34,7 +34,7 @@ export function SettingsMenu() {
           </label>
         ))}
         <p className="muted small">
-          Atajos: Ctrl+1..9 ir a sesión · Ctrl+Tab siguiente · Ctrl+Shift+N nueva · Ctrl+Shift+C/V copiar/pegar
+          Shortcuts: Ctrl+1..9 go to session · Ctrl+Tab next · Ctrl+Shift+N new · Ctrl+Shift+C/V copy/paste · Ctrl+Enter newline
         </p>
       </div>
     </>

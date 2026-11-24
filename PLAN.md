@@ -184,3 +184,52 @@ clawhip/
 - Variables cifradas: AES-256-GCM con clave derivada (scrypt) de `master.key` (Docker secret).
 - Docker: `web/Dockerfile` compila para arm64 con buildx **sin QEMU** (node-pty con compilador cruzado en la etapa de build; la etapa final solo hace COPY). Claude Code nativo descargado de `downloads.claude.ai` y verificado con el SHA-256 del manifiesto. El entrypoint registra el usuario con el UID/GID/home de la Pi y baja privilegios con `setpriv`; `TMPDIR=/data/tmp`.
 - Probado: servidor local con Node (sesión, variables, Claude, terminal); imagen amd64 equivalente en Docker (usuario, permisos en el home montado, Claude arrancando, `docker stop` limpio); imagen arm64 compilada y binarios verificados como aarch64. **No probado en una Raspberry real.**
+
+## Renombre a betools (2026-11-18)
+- La app de escritorio pasa a llamarse **betools** (paquete `betools`, `/opt/betools`, `/usr/bin/betools`, datos en `~/.config/betools`). La versión web sigue como clawhip.
+- `migrate.ts`: en el primer arranque copia `sessions.json`, `settings.json`, `openers.json` y `secrets.json` de `~/.config/clawhip` (no borra la carpeta vieja). El autoarranque `clawhip.desktop` se reemplaza por `betools.desktop`.
+- Se eliminó la CLI `betools` anterior (binario en `~/.local/bin`, función del `.zshrc`, `~/.cache/betools`); su configuración quedó en `~/.config/betools-cli-backup/`.
+
+## v0.3.0 — Inglés + barra de consumo
+
+- Toda la interfaz de escritorio (y los mensajes del proceso principal) en inglés.
+- Encabezado: modelo y % de contexto de la sesión seleccionada, límites del plan (ventana de 5 h y semanal,
+  con hora de reinicio) y tokens de hoy.
+  - Modelo, contexto y límites: status line propio pasado con `--settings` que guarda el JSON de Claude Code en
+    `<status>.line` y después llama al status line del usuario con `BETOOLS=1` (`src/main/usage.ts`).
+    Los límites se guardan en `userData/plan-limits.json`.
+  - Tokens de hoy: suma de `message.usage` (input + output + cache write + cache read) de todos los transcripts de
+    `~/.claude/projects` con timestamp de hoy, uno por `message.id`. Se recalcula cada 30 s.
+- `~/.claude/statusline-command.sh` omite modelo y barra de contexto cuando `BETOOLS=1`.
+- La versión web no cambió de funcionalidad; comparte componentes, así que algunos textos quedan en inglés.
+
+## v0.4.0 — Pestaña Rendered + reinicio automático por variables
+
+- Pestañas: **Rendered** (por defecto) → Terminal → CLI. Ctrl+` las recorre (Ctrl+Shift+` al revés).
+  - Rendered: conversación de solo lectura desde el transcript (`TranscriptParser.items`), Markdown con `marked`
+    saneado con DOMPurify; bloques ```html en iframe aislado (sandbox sin scripts) con tema oscuro forzado.
+    Herramientas consecutivas agrupadas en una línea desplegable. Links → navegador del sistema.
+  - El proceso de Claude arranca al seleccionar la sesión aunque la pestaña CLI no se vea (terminal oculta con
+    `visibility` para medir su tamaño).
+- Al agregar, cambiar o borrar una variable se reinician las sesiones afectadas que estén corriendo (la sesión, o
+  todas las de la carpeta). Si están `working` o `waiting` (permiso, pregunta, selección), el reinicio queda
+  pendiente hasta que Claude termina el turno. Debounce de 1,5 s para cambios seguidos. Solo escritorio.
+
+## v0.5.0 (en curso, sin empaquetar) — UI v2 + trabajo completo desde Rendered
+
+- Tema v2 (`src/renderer/src/theme.css`, se puede quitar borrándolo y su import): Inter empaquetada
+  (`@fontsource-variable/inter@5.2.8`), barra de título de 44 px, paneles a altura completa separados por 1 px,
+  filas de sesión con punto de estado a la izquierda, tickets teñidos con el color de la carpeta, sin adornos.
+- Rendered permite responder: caja de texto que escribe en el mismo proceso de Claude (Enter envía,
+  Shift/Ctrl+Enter salto de línea, Esc o Stop interrumpe; varias líneas van como bracketed paste).
+- Menús (permisos, AskUserQuestion, selectores): se leen de la pantalla de xterm (`term-registry.ts`,
+  `menu-parser.ts`) y se muestran como botones; números, flechas, Enter y Esc funcionan desde la caja.
+  Depende del formato de la TUI de Claude Code: si cambia, el parser puede dejar de reconocerlos (queda la pestaña CLI).
+
+## v0.6.0 — Zoom
+
+- Zoom de toda la ventana (`webFrame.setZoomFactor`): Ctrl + / − / 0 y Ctrl+rueda fuera del chat.
+- Zoom solo del chat (columna central): Ctrl+Shift + / − / 0 y Ctrl+rueda sobre el chat. En Rendered usa CSS
+  `zoom`; en las terminales cambia el tamaño de letra de xterm y reacomoda la grilla del pty.
+- Control en la barra de título (muestra el % si no es 100) con − / % (vuelve a 100) / + para cada uno.
+- Se recuerda por equipo en localStorage (`zoomApp`, `zoomChat`). Pasos: 50 %–250 %.

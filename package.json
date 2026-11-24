@@ -1,8 +1,8 @@
 {
-  "name": "clawhip",
-  "version": "0.1.5",
+  "name": "betools",
+  "version": "0.6.0",
   "private": true,
-  "description": "Desktop app to manage multiple Claude Code sessions",
+  "description": "Claude Code sessions in one window",
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
+    "@fontsource-variable/inter": "5.2.8",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -28,21 +29,23 @@
     "@vitejs/plugin-react": "^6.3.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "dompurify": "3.4.17",
     "electron": "^45.3.4",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
+    "marked": "18.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
   },
   "author": {
-    "name": "clawhip"
+    "name": "betools"
   },
-  "homepage": "https://localhost/clawhip",
+  "homepage": "https://localhost/betools",
   "build": {
-    "appId": "local.clawhip.app",
-    "productName": "clawhip",
+    "appId": "local.betools.app",
+    "productName": "betools",
     "directories": {
       "output": "dist",
       "buildResources": "resources"
@@ -66,11 +69,11 @@
       ],
       "icon": "resources/icon-512.png",
       "category": "Development",
-      "executableName": "clawhip",
-      "synopsis": "Sesiones de Claude Code en una sola ventana",
-      "maintainer": "clawhip <clawhip@localhost>",
+      "executableName": "betools",
+      "synopsis": "Claude Code sessions in one window",
+      "maintainer": "betools <betools@localhost>",
       "syncDesktopName": true
     }
   },
-  "desktopName": "clawhip.desktop"
+  "desktopName": "betools.desktop"
 }

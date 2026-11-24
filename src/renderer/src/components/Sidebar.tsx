@@ -29,12 +29,12 @@ interface Props {
 }
 
 export const STATUS_LABEL: Record<SessionStatus, string> = {
-  stopped: 'Sin iniciar',
-  idle: 'Esperando un prompt',
-  working: 'Trabajando…',
-  waiting: 'Necesita tu respuesta',
-  done: 'Terminó',
-  exited: 'Proceso terminado'
+  stopped: 'Not started',
+  idle: 'Waiting for a prompt',
+  working: 'Working…',
+  waiting: 'Needs your input',
+  done: 'Done',
+  exited: 'Process exited'
 }
 
 const short = (p: string) => p.replace(/^\/home\/[^/]+/, '~')
@@ -64,14 +64,14 @@ export function Sidebar(props: Props) {
     <aside className="card sidebar" style={focused ? { ['--fc' as string]: focused.color } : undefined}>
       {focused ? (
         <header className="card-header focus-header">
-          <button className="btn-sm back" onClick={() => props.onFocus(null)} title="Ver todas las carpetas">
-            ← Todas
+          <button className="btn-sm back" onClick={() => props.onFocus(null)} title="Show all folders">
+            ← All
           </button>
           <span style={{ flex: 1 }} />
-          <button className="icon-btn" title="Editar carpeta" onClick={() => props.onEditFolder(focused)}>
+          <button className="icon-btn" title="Edit folder" onClick={() => props.onEditFolder(focused)}>
             ✎
           </button>
-          <button className="icon-btn" title="Cerrar panel" onClick={props.onCollapse}>
+          <button className="icon-btn" title="Collapse panel" onClick={props.onCollapse}>
             «
           </button>
           <div className="focus-title">
@@ -80,21 +80,21 @@ export function Sidebar(props: Props) {
           </div>
           <span className="focus-path">{short(focused.path)}</span>
           <button className="primary focus-new" onClick={() => props.onNew(focused)}>
-            <span className="plus">+</span> Nueva sesión en {focused.name}
+            <span className="plus">+</span> New session in {focused.name}
           </button>
         </header>
       ) : (
         <header className="card-header">
           <span className="grip">⠿</span>
-          <h2>Sesiones</h2>
+          <h2>Sessions</h2>
           <span style={{ flex: 1 }} />
-          <button className="btn-sm" onClick={() => props.onNew()} title="Nueva sesión fuera de una carpeta (Ctrl+Shift+N)">
-            Nueva sesión
+          <button className="btn-sm ghost" onClick={() => props.onNew()} title="New session outside a folder (Ctrl+Shift+N)">
+            New session
           </button>
-          <Kebab title="Ajustes">
+          <Kebab title="Settings">
             <SettingsMenu />
           </Kebab>
-          <button className="icon-btn" title="Cerrar panel" onClick={props.onCollapse}>
+          <button className="icon-btn" title="Collapse panel" onClick={props.onCollapse}>
             «
           </button>
         </header>
@@ -110,26 +110,26 @@ export function Sidebar(props: Props) {
               {!focused && <div className="group-header" onClick={() => folder && props.onToggleFolder(folder)} title={folder ? folder.path : undefined}>
                 <span className="caret">{folder ? (collapsed ? '▸' : '▾') : ''}</span>
                 <span className="folder-dot" />
-                <span className="group-name">{folder?.name ?? 'Sin carpeta'}</span>
+                <span className="group-name">{folder?.name ?? 'No folder'}</span>
                 <span className="group-count">{sessions.length}</span>
                 {collapsed && attention > 0 && <span className="group-alert">{attention}!</span>}
                 <span style={{ flex: 1 }} />
                 {folder && (
                   <div className="folder-actions" onClick={(e) => e.stopPropagation()}>
-                    <button className="icon-btn" title={`Nueva sesión en ${folder.name}`} onClick={() => props.onNew(folder)}>
+                    <button className="icon-btn" title={`New session in ${folder.name}`} onClick={() => props.onNew(folder)}>
                       +
                     </button>
                     <Kebab
-                      title="Acciones de la carpeta"
+                      title="Folder actions"
                       items={[
-                        { label: 'Nueva sesión', onClick: () => props.onNew(folder) },
-                        { label: 'Agrandar (ver solo esta carpeta)', onClick: () => props.onFocus(folder) },
-                        { label: 'Editar nombre, color y paths…', onClick: () => props.onEditFolder(folder) },
-                        { label: 'Variables de entorno…', onClick: () => props.onFolderEnv(folder) },
-                        { label: 'Comandos…', onClick: () => props.onFolderCommands(folder) },
-                        ...(gi > 0 ? [{ label: 'Subir', onClick: () => props.onMoveFolder(folder, -1) }] : []),
-                        ...(gi < folderCount - 1 ? [{ label: 'Bajar', onClick: () => props.onMoveFolder(folder, 1) }] : []),
-                        { label: 'Borrar carpeta', onClick: () => props.onDeleteFolder(folder), danger: true }
+                        { label: 'New session', onClick: () => props.onNew(folder) },
+                        { label: 'Expand (show only this folder)', onClick: () => props.onFocus(folder) },
+                        { label: 'Edit name, color and paths…', onClick: () => props.onEditFolder(folder) },
+                        { label: 'Environment variables…', onClick: () => props.onFolderEnv(folder) },
+                        { label: 'Commands…', onClick: () => props.onFolderCommands(folder) },
+                        ...(gi > 0 ? [{ label: 'Move up', onClick: () => props.onMoveFolder(folder, -1) }] : []),
+                        ...(gi < folderCount - 1 ? [{ label: 'Move down', onClick: () => props.onMoveFolder(folder, 1) }] : []),
+                        { label: 'Delete folder', onClick: () => props.onDeleteFolder(folder), danger: true }
                       ]}
                     />
                   </div>
@@ -152,38 +152,23 @@ export function Sidebar(props: Props) {
                           setEditing(s.id)
                           setDraft(titles[s.id] ?? '')
                         }}
-                        title={`${s.cwd}\n${STATUS_LABEL[st]}\nDoble clic para editar ticket y resumen`}
+                        title={`${s.cwd}\n${STATUS_LABEL[st]}\nDouble-click to edit ticket and summary`}
                       >
-                        <div className="session-top">
-                          {ticket ? (
-                            <span className="ticket" style={{ background: color, color: textOn(color) }}>
-                              {ticket}
-                            </span>
-                          ) : (
-                            <span className="ticket none">sin ticket</span>
+                        <span className={`dot ${st}`}>{st === 'waiting' ? '!' : ''}</span>
+                        <div className="session-body">
+                          {(ticket || st === 'working' || st === 'waiting' || st === 'done') && (
+                            <div className="session-top">
+                              {ticket && <span className="ticket">{ticket}</span>}
+                              {(st === 'working' || st === 'waiting' || st === 'done') && (
+                                <span className={`status ${st}`}>{STATUS_LABEL[st]}</span>
+                              )}
+                            </div>
                           )}
-                          <span className={`status ${st}`}>
-                            <span className={`dot ${st}`}>{st === 'waiting' ? '!' : ''}</span>
-                            {st === 'working' || st === 'waiting' || st === 'done' ? STATUS_LABEL[st] : ''}
-                          </span>
-                          <span style={{ flex: 1 }} />
-                          {n !== null && <span className="shortcut">^{n}</span>}
-                          <button
-                            className="icon-btn close"
-                            title="Cerrar sesión"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              props.onClose(s.id)
-                            }}
-                          >
-                            ×
-                          </button>
-                        </div>
                         {editing === s.id ? (
                           <input
                             autoFocus
                             value={draft}
-                            placeholder="VE-123 resumen de la tarea"
+                            placeholder="VE-123 task summary"
                             onChange={(e) => setDraft(e.target.value)}
                             onBlur={() => commit(s.id)}
                             onKeyDown={(e) => {
@@ -193,17 +178,31 @@ export function Sidebar(props: Props) {
                             onClick={(e) => e.stopPropagation()}
                           />
                         ) : (
-                          <p className={`summary ${fallback ? 'no-title' : ''}`} title={fallback ? 'Sin título de Warp ni de Claude: se muestra el nombre con que se importó' : undefined}>
+                          <p className={`summary ${fallback ? 'no-title' : ''}`} title={fallback ? 'No title from Warp or Claude: showing the name it was imported with' : undefined}>
                             {summary ?? s.name}
                           </p>
                         )}
-                        {sub && <span className="session-cwd">{sub}</span>}
+                          {sub && <span className="session-cwd">{sub}</span>}
+                        </div>
+                        <div className="session-side">
+                          {n !== null && <span className="shortcut">^{n}</span>}
+                          <button
+                            className="icon-btn close"
+                            title="Close session"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              props.onClose(s.id)
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
                       </li>
                     )
                   })}
                   {folder && sessions.length === 0 && (
                     <li className="empty" onClick={() => props.onNew(folder)}>
-                      Sin sesiones. <a>Crear una</a>
+                      No sessions. <a>Create one</a>
                     </li>
                   )}
                 </ul>
@@ -213,7 +212,7 @@ export function Sidebar(props: Props) {
         })}
         {groups.length === 0 && (
           <p className="empty pad">
-            Crea una carpeta por cliente con <b>Nueva carpeta</b>, o trae una sesión existente con <b>Importar sesión</b>.
+            Create a folder per client with <b>New folder</b>, or bring in an existing session with <b>Import session</b>.
           </p>
         )}
       </div>

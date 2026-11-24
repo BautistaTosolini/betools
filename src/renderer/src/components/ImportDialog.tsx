@@ -7,7 +7,7 @@ interface Props {
 }
 
 const short = (p: string) => p.replace(/^\/home\/[^/]+/, '~')
-const fmt = new Intl.DateTimeFormat('es', { dateStyle: 'short', timeStyle: 'short' })
+const fmt = new Intl.DateTimeFormat('en-US', { dateStyle: 'short', timeStyle: 'short' })
 
 export function ImportDialog({ onImport, onCancel }: Props) {
   const [items, setItems] = useState<DiscoveredSession[] | null>(null)
@@ -35,16 +35,16 @@ export function ImportDialog({ onImport, onCancel }: Props) {
   return (
     <div className="modal-backdrop" onClick={onCancel}>
       <div className="modal wide" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
-        <h2>Importar una sesión existente</h2>
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por título o carpeta…" />
+        <h2>Import an existing session</h2>
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by title or folder…" />
         <p className="muted small">
-          Si la sesión sigue abierta en otra terminal, ciérrala ahí antes: dos procesos sobre la misma sesión escriben
-          el mismo historial.
+          If the session is still open in another terminal, close it there first: two processes on the same session write
+          to the same history.
         </p>
         {error && <p className="error">{error}</p>}
         <ul className="import-list">
-          {items === null && <li className="empty">Buscando sesiones…</li>}
-          {items && filtered.length === 0 && <li className="empty">No hay sesiones para importar.</li>}
+          {items === null && <li className="empty">Searching sessions…</li>}
+          {items && filtered.length === 0 && <li className="empty">No sessions to import.</li>}
           {filtered.map((s) => (
             <li
               key={s.id}
@@ -55,13 +55,13 @@ export function ImportDialog({ onImport, onCancel }: Props) {
               <span className="import-title">{s.title}</span>
               <span className="import-meta">
                 {short(s.cwd)} · {fmt.format(new Date(s.modifiedAt))} · {s.sizeKb} KB
-                {!s.cwdExists && ' · la carpeta de trabajo ya no existe'}
+                {!s.cwdExists && ' · working directory no longer exists'}
               </span>
             </li>
           ))}
         </ul>
         <div className="actions">
-          <button onClick={onCancel}>Cerrar</button>
+          <button onClick={onCancel}>Close</button>
         </div>
       </div>
     </div>

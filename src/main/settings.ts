@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import type { Settings } from '../shared/types'
 
 const DEFAULTS: Settings = { closeToTray: true, autostart: false, notifications: true, eagerStart: false }
-const AUTOSTART_FILE = join(homedir(), '.config', 'autostart', 'clawhip.desktop')
+const AUTOSTART_FILE = join(homedir(), '.config', 'autostart', 'betools.desktop')
+// Entrada de autoarranque del nombre anterior de la app.
+const LEGACY_AUTOSTART = join(homedir(), '.config', 'autostart', 'clawhip.desktop')
 
 export class SettingsStore {
   private readonly file = join(app.getPath('userData'), 'settings.json')
@@ -16,6 +18,11 @@ export class SettingsStore {
       this.state = { ...DEFAULTS, ...JSON.parse(readFileSync(this.file, 'utf8')) }
     } catch {
       this.state = { ...DEFAULTS }
+    }
+    // Si estaba el autoarranque con el nombre anterior (clawhip), se reemplaza por el nuevo.
+    if (existsSync(LEGACY_AUTOSTART)) {
+      rmSync(LEGACY_AUTOSTART, { force: true })
+      setAutostart(true)
     }
     // El archivo de autostart manda: si el usuario lo borró a mano, se refleja.
     this.state.autostart = existsSync(AUTOSTART_FILE)
@@ -52,8 +59,8 @@ function setAutostart(enabled: boolean): void {
     [
       '[Desktop Entry]',
       'Type=Application',
-      'Name=clawhip',
-      'Comment=Sesiones de Claude Code',
+      'Name=betools',
+      'Comment=Claude Code sessions',
       `Exec=${exec}`,
       'X-GNOME-Autostart-enabled=true',
       ''

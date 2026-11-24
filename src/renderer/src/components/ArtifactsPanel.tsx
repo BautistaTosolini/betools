@@ -8,7 +8,7 @@ interface Props {
   onCollapse(): void
 }
 
-const rtf = new Intl.RelativeTimeFormat('es', { numeric: 'auto' })
+const rtf = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' })
 function ago(iso: string): string {
   const s = (Date.parse(iso) - Date.now()) / 1000
   const steps: [number, Intl.RelativeTimeFormatUnit][] = [
@@ -79,17 +79,17 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
     <aside className="card artifacts">
       <header className="card-header">
         <span className="grip">⠿</span>
-        <h2>Artefactos</h2>
+        <h2>Artifacts</h2>
         <span style={{ flex: 1 }} />
-        <button className="icon-btn" title="Cerrar panel" onClick={onCollapse}>
+        <button className="icon-btn" title="Collapse panel" onClick={onCollapse}>
           »
         </button>
         <div className="seg">
           <button className={onlyDocs ? 'on' : ''} onClick={() => setOnlyDocs(true)}>
-            Documentos {artifacts.filter((a) => a.isDocument).length}
+            Documents {artifacts.filter((a) => a.isDocument).length}
           </button>
           <button className={!onlyDocs ? 'on' : ''} onClick={() => setOnlyDocs(false)}>
-            Todos {artifacts.length}
+            All {artifacts.length}
           </button>
         </div>
       </header>
@@ -101,7 +101,7 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
               key={a.path}
               className={`artifact ${a.exists ? '' : 'missing'}`}
               onClick={() => a.exists && open(a)}
-              title={`${a.path}\n${a.sources.join(' + ')}${a.sources.includes('Bash') ? ' (detectado en un comando)' : ''}${a.exists ? '' : '\nEl archivo ya no existe'}`}
+              title={`${a.path}\n${a.sources.join(' + ')}${a.sources.includes('Bash') ? ' (detected in a command)' : ''}${a.exists ? '' : '\nThe file no longer exists'}`}
             >
               <span className="badge" style={{ background: BADGE_COLORS[ext] ?? 'var(--panel-2)' }}>
                 {ext.slice(0, 4)}
@@ -115,7 +115,7 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
               <div className="artifact-actions">
                 <button
                   className="icon-btn"
-                  title="Mostrar en carpeta"
+                  title="Show in folder"
                   disabled={!a.exists}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -126,7 +126,7 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
                 </button>
                 <button
                   className="icon-btn"
-                  title="Copiar ruta"
+                  title="Copy path"
                   onClick={(e) => {
                     e.stopPropagation()
                     api.writeClipboard(a.path)
@@ -141,8 +141,8 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
         {session && visible.length === 0 && (
           <li className="empty">
             {artifacts.length === 0
-              ? 'Esta sesión todavía no generó archivos.'
-              : 'No hay documentos. Mira la pestaña "Todos".'}
+              ? 'This session has not created any files yet.'
+              : 'No documents. Check the "All" tab.'}
           </li>
         )}
       </ul>

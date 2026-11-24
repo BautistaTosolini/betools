@@ -9,11 +9,11 @@ import type { EnvScope, EnvSource, EnvVarMeta } from '../shared/types'
 
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
 // Variables que no se pueden pisar: romperían la sesión o el seguimiento de estado.
-const RESERVED = /^(PATH|HOME|USER|SHELL|TERM|COLORTERM|PWD|CLAWHIP_.*|CLAUDE_CODE_.*|CLAUDECODE)$/
+const RESERVED = /^(PATH|HOME|USER|SHELL|TERM|COLORTERM|PWD|CLAWHIP_.*|BETOOLS.*|CLAUDE_CODE_.*|CLAUDECODE)$/
 
 export function validateName(name: string): void {
-  if (!NAME_RE.test(name)) throw new Error('Nombre inválido: solo letras, números y "_", sin empezar con número.')
-  if (RESERVED.test(name)) throw new Error(`${name} está reservada y no se puede pisar.`)
+  if (!NAME_RE.test(name)) throw new Error('Invalid name: only letters, numbers and "_", not starting with a number.')
+  if (RESERVED.test(name)) throw new Error(`${name} is reserved and cannot be overridden.`)
 }
 
 // Almacén de valores secretos "local" (escritorio: llavero del sistema; web: clave maestra).
@@ -47,13 +47,13 @@ export async function resolveRef(source: EnvSource): Promise<string> {
     try {
       parsed = JSON.parse(raw)
     } catch {
-      throw new Error('El secreto no es JSON: no se puede extraer la clave indicada.')
+      throw new Error('The secret is not JSON: the given key cannot be extracted.')
     }
     const v = (parsed as Record<string, unknown>)?.[source.jsonKey]
-    if (v === undefined) throw new Error(`El secreto no tiene la clave "${source.jsonKey}".`)
+    if (v === undefined) throw new Error(`The secret has no key "${source.jsonKey}".`)
     return typeof v === 'string' ? v : JSON.stringify(v)
   }
-  throw new Error('Origen no soportado')
+  throw new Error('Unsupported source')
 }
 
 // Perfiles de ~/.aws/config, para elegir en la interfaz.
@@ -90,7 +90,7 @@ export async function resolveEnv(
             : meta.source.kind === 'local'
               ? local.get(scope, meta.name)
               : await resolveRef(meta.source)
-        if (v === null) throw new Error('no hay valor guardado')
+        if (v === null) throw new Error('no stored value')
         env[meta.name] = v
       } catch (e) {
         errors.push(`${meta.name}: ${e instanceof Error ? e.message : String(e)}`)

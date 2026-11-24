@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 
-// Reglas de apertura por extensión en ~/.config/clawhip/openers.json.
+// Reglas de apertura por extensión en ~/.config/betools/openers.json.
 // "{path}" se reemplaza por la ruta del archivo. "default" aplica al resto.
 type Openers = Record<string, string[]>
 
@@ -40,7 +40,7 @@ function run(cmd: string[], path: string): Promise<void> {
 }
 
 export async function openArtifact(path: string): Promise<void> {
-  if (!existsSync(path)) throw new Error(`El archivo ya no existe: ${path}`)
+  if (!existsSync(path)) throw new Error(`The file no longer exists: ${path}`)
   const openers = loadOpeners()
   const cmd = openers[extname(path).toLowerCase()] ?? openers.default
   try {

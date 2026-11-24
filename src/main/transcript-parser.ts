@@ -4,7 +4,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
-import type { Artifact, ArtifactSource } from '../shared/types'
+import type { Artifact, ArtifactSource, ConversationItem } from '../shared/types'
 
 // Extensiones que se consideran "documento" (filtro por defecto del panel).
 export const DOCUMENT_EXTS = new Set([
@@ -49,6 +49,15 @@ export class TranscriptParser {
   private readonly pending = new Map<string, Op[]>()
   private customTitle: string | null = null
   private aiTitle: string | null = null
+  // Modelo de la última respuesta (id, p. ej. "claude-opus-5-5"); "<synthetic>" son mensajes internos.
+  private lastModel: string | null = null
+
+  model(): string | null {
+    return this.lastModel
+  }
+
+  // Conversación para la pestaña Rendered. Solo crece (se agregan ítems o se extiende el último).
+  readonly items: ConversationItem[] = []
 
   // /rename gana sobre el título generado por Claude.
   title(): string | null {
@@ -102,11 +111,18 @@ export class TranscriptParser {
       this.aiTitle = d.aiTitle.trim() || null
       return true
     }
+    if (!d?.isSidechain) this.conversation(d)
+    let modelChanged = false
+    const m = d?.type === 'assistant' ? d.message?.model : undefined
+    if (typeof m === 'string' && m && !m.startsWith('<') && m !== this.lastModel) {
+      this.lastModel = m
+      modelChanged = true
+    }
     const content = d?.message?.content
-    if (!Array.isArray(content)) return false
+    if (!Array.isArray(content)) return modelChanged
     const at: string = d.timestamp ?? new Date().toISOString()
     const cwd: string | undefined = d.cwd
-    let changed = false
+    let changed = modelChanged
 
     for (const c of content) {
       if (c?.type === 'tool_use' && d.type === 'assistant') {
@@ -126,6 +142,60 @@ export class TranscriptParser {
       }
     }
     return changed
+  }
+
+  private push_(item: ConversationItem): void {
+    const last = this.items[this.items.length - 1]
+    // Bloques de texto consecutivos de la misma respuesta: un solo ítem.
+    if (item.kind === 'assistant' && last?.kind === 'assistant' && item.msgId && last.msgId === item.msgId) {
+      this.items[this.items.length - 1] = { ...last, text: `${last.text}\n\n${item.text}` }
+      return
+    }
+    this.items.push(item)
+  }
+
+  private conversation(d: any): void {
+    const at: string = d.timestamp ?? new Date().toISOString()
+    const content = d.message?.content
+    if (d.type === 'user') {
+      if (d.isCompactSummary) return this.push_({ kind: 'summary', text: 'Conversation compacted', at })
+      if (d.isMeta) return
+      const texts: string[] =
+        typeof content === 'string'
+          ? [content]
+          : Array.isArray(content)
+            ? content.flatMap((c: any) => (c?.type === 'text' && typeof c.text === 'string' ? [c.text] : c?.type === 'image' ? ['[image]'] : []))
+            : []
+      for (const raw of texts) {
+        const t = raw.trim()
+        if (!t) continue
+        const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t)
+        if (cmd) {
+          const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1]?.trim()
+          this.push_({ kind: 'command', text: `${cmd[1]}${args ? ' ' + args : ''}`, at })
+          continue
+        }
+        const bash = /<bash-input>([\s\S]*?)<\/bash-input>/.exec(t)
+        if (bash) {
+          this.push_({ kind: 'command', text: `! ${bash[1].trim()}`, at })
+          continue
+        }
+        // Salidas de comandos locales, avisos internos y recordatorios del sistema: no son mensajes tuyos.
+        if (/^<(local-command|bash-std|system-reminder|task-notification|command-)/.test(t)) continue
+        this.push_({ kind: 'user', text: t, at })
+      }
+      return
+    }
+    if (d.type === 'assistant' && Array.isArray(content)) {
+      const msgId: string | undefined = d.message?.id
+      for (const c of content) {
+        if (c?.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
+          this.push_({ kind: 'assistant', text: c.text, at, msgId })
+        } else if (c?.type === 'tool_use') {
+          this.push_({ kind: 'tool', text: toolSummary(c.name, c.input ?? {}), at, msgId })
+        }
+      }
+    }
   }
 
   private opsFor(c: any, cwd: string | undefined, at: string): Op[] {
@@ -182,4 +252,12 @@ export class TranscriptParser {
     a.ops--
     if (a.ops <= 0) this.artifacts.delete(op.path)
   }
+}
+
+// Una línea por herramienta: el dato más representativo de su entrada.
+function toolSummary(name: string, input: any): string {
+  const pick = [input.command, input.file_path, input.notebook_path, input.pattern, input.url, input.query, input.description, input.prompt, input.skill]
+    .find((v) => typeof v === 'string' && v.trim()) as string | undefined
+  const one = (pick ?? '').replace(/\s+/g, ' ').trim()
+  return one ? `${name}: ${one.length > 240 ? one.slice(0, 240) + '…' : one}` : name
 }

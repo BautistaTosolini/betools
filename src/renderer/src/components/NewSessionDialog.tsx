@@ -18,7 +18,7 @@ export function NewSessionDialog({ folder, onCreate, onCancel }: Props) {
   }
 
   const submit = async () => {
-    if (!cwd) return setError('Elige una carpeta.')
+    if (!cwd) return setError('Choose a folder.')
     try {
       await onCreate(cwd, folder?.name ?? cwd.split('/').filter(Boolean).pop() ?? '', title)
     } catch (e) {
@@ -38,7 +38,7 @@ export function NewSessionDialog({ folder, onCreate, onCancel }: Props) {
         }}
       >
         <h2>
-          Nueva sesión
+          New session
           {folder && (
             <span className="folder-tag" style={{ borderColor: folder.color, color: folder.color }}>
               {folder.name}
@@ -46,21 +46,21 @@ export function NewSessionDialog({ folder, onCreate, onCancel }: Props) {
           )}
         </h2>
         <label>
-          Ticket y resumen <span className="muted small">(opcional; si no, lo pone Claude al tomar el ticket)</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="VE-123 rotar certificados" autoFocus />
+          Ticket and summary <span className="muted small">(optional; otherwise Claude sets it when it picks up the ticket)</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="VE-123 rotate certificates" autoFocus />
         </label>
         <label>
-          Carpeta de trabajo
+          Working directory
           <div className="row">
-            <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/home/…/proyecto" />
-            <button onClick={pick}>Elegir…</button>
+            <input value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/home/…/project" />
+            <button onClick={pick}>Browse…</button>
           </div>
         </label>
         {error && <p className="error">{error}</p>}
         <div className="actions">
-          <button onClick={onCancel}>Cancelar</button>
+          <button onClick={onCancel}>Cancel</button>
           <button className="primary" onClick={submit}>
-            Crear
+            Create
           </button>
         </div>
       </div>

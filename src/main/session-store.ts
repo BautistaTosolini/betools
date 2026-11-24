@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { EnvScope, EnvVarMeta, Folder, Session, StoreState } from '../shared/types'
 
-// Persiste la lista de sesiones en ~/.config/clawhip/sessions.json.
+// Persiste la lista de sesiones en ~/.config/betools/sessions.json.
 // Una sesión solo se elimina cuando el usuario la cierra desde la UI.
 export class SessionStore {
   private readonly file: string
@@ -96,7 +96,7 @@ export class SessionStore {
 
   setEnv(scope: EnvScope, meta: EnvVarMeta): void {
     const owner = scope.kind === 'folder' ? this.state.folders.find((f) => f.id === scope.id) : this.find(scope.id)
-    if (!owner) throw new Error('No existe la carpeta o sesión')
+    if (!owner) throw new Error('Folder or session not found')
     owner.env = [...(owner.env ?? []).filter((e) => e.name !== meta.name), meta].sort((a, b) => a.name.localeCompare(b.name))
     this.save()
   }

@@ -97,3 +97,43 @@ export interface Artifact {
   lastAt: string
   exists: boolean
 }
+
+// Datos de la sesión que Claude Code pasa a su status line.
+export interface SessionMeta {
+  model: string | null
+  // % de la ventana de contexto en uso.
+  contextPct: number | null
+}
+
+// Límites del plan (Pro/Max) según Claude Code: ventana de 5 horas y semanal. resetsAt en segundos Unix.
+export interface PlanWindow {
+  pct: number
+  resetsAt: number | null
+}
+export interface PlanLimits {
+  fiveHour: PlanWindow | null
+  sevenDay: PlanWindow | null
+  updatedAt: number
+}
+
+// Tokens de hoy (hora local) sumando todos los transcripts de ~/.claude/projects.
+export interface DailyTokens {
+  day: string
+  input: number
+  output: number
+  cacheWrite: number
+  cacheRead: number
+  total: number
+  messages: number
+}
+
+// Conversación de una sesión leída del transcript, para la pestaña "Rendered" (solo lectura).
+// user: prompt tuyo · assistant: texto de Claude (Markdown) · tool: herramienta que usó (resumen de una línea)
+// command: slash command o "!" · summary: marca de compactación
+export interface ConversationItem {
+  kind: 'user' | 'assistant' | 'tool' | 'command' | 'summary'
+  text: string
+  at: string
+  // Respuesta a la que pertenece (los bloques de texto de una misma respuesta se juntan).
+  msgId?: string
+}

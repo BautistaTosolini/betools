@@ -1,4 +1,5 @@
-import { closeSync, mkdirSync, openSync, readSync, statSync, unwatchFile, watchFile, writeFileSync } from 'node:fs'
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, statSync, unwatchFile, watchFile, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { SessionStatus } from '../shared/types'
 
@@ -44,8 +45,30 @@ const ENV_DUMP_DENY = [
   'Bash(strings /proc/self/environ)'
 ]
 
+// Status line propio: guarda el JSON que manda Claude Code (modelo, contexto, límites del plan) en
+// $CLAWHIP_STATUS_FILE.line para que betools lo muestre arriba, y después corre el status line del
+// usuario (si tiene) con BETOOLS=1, para que pueda omitir lo que ya muestra betools.
+const STATUS_LINE =
+  `p=$(cat); f="$CLAWHIP_STATUS_FILE.line"; printf '%s' "$p" > "$f.tmp" && mv -f "$f.tmp" "$f"; ` +
+  `if [ -n "$BETOOLS_USER_STATUSLINE" ]; then printf '%s' "$p" | BETOOLS=1 sh -c "$BETOOLS_USER_STATUSLINE"; fi; exit 0`
+
 export function buildSettings(hasSecrets: boolean): string {
-  return JSON.stringify({ hooks: HOOKS, ...(hasSecrets ? { permissions: { deny: ENV_DUMP_DENY } } : {}) })
+  return JSON.stringify({
+    hooks: HOOKS,
+    // refreshInterval: cada 30 s además de los eventos, para que los límites no queden viejos.
+    statusLine: { type: 'command', command: STATUS_LINE, refreshInterval: 30 },
+    ...(hasSecrets ? { permissions: { deny: ENV_DUMP_DENY } } : {})
+  })
+}
+
+// Comando de status line del usuario (~/.claude/settings.json), que el de betools reemplaza y vuelve a llamar.
+export function userStatusLine(): string {
+  try {
+    const s = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8'))
+    return s?.statusLine?.type === 'command' && typeof s.statusLine.command === 'string' ? s.statusLine.command : ''
+  } catch {
+    return ''
+  }
 }
 
 interface Tracked {

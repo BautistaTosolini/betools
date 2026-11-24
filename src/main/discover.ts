@@ -99,7 +99,7 @@ export function discoverSessions(exclude: Set<string>, limit = 300): DiscoveredS
       if (d.type === 'ai-title' && typeof d.aiTitle === 'string') ai = d.aiTitle
     }
     if (!headCwd && !tailCwd) continue
-    const title = custom || ai || head.map(promptText).find(Boolean) || '(sin prompt)'
+    const title = custom || ai || head.map(promptText).find(Boolean) || '(no prompt)'
     raws.push({ id: f.id, dir: f.dir, mtime: f.mtime, size: f.size, headCwd, tailCwd, title })
   }
 

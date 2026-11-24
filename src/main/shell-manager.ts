@@ -71,7 +71,7 @@ export class ShellManager {
     this.starting.delete(key)
     if (!pending) return
     if (resolved.errors.length) {
-      this.events.onData(key, `\x1b[33mNo se pudieron cargar algunas variables:\r\n${resolved.errors.map((e) => `  · ${e}`).join('\r\n')}\x1b[0m\r\n`)
+      this.events.onData(key, `\x1b[33mSome variables could not be loaded:\r\n${resolved.errors.map((e) => `  · ${e}`).join('\r\n')}\x1b[0m\r\n`)
     }
     const shell = process.env.SHELL || '/bin/bash'
     const proc = pty.spawn(shell, ['-l'], {

@@ -11,6 +11,9 @@ interface Props {
   onClose(): void
 }
 
+// Escritorio: el proceso principal reinicia solo las sesiones afectadas. Web: reinicio manual.
+const AUTO_RESTART = !!(window.clawhip as { autoRestart?: boolean }).autoRestart
+
 export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
   const [inherited, setInherited] = useState<{ label: string; vars: EnvVarMeta[] } | undefined>()
   const [dirty, setDirty] = useState(false)
@@ -27,7 +30,7 @@ export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
 
   const restart = async () => {
     if (!sessionId) return
-    if (!window.confirm('¿Reiniciar la sesión para aplicar las variables?\n\nSe retoma la conversación con --resume; si Claude estaba trabajando, esa tarea se corta.')) return
+    if (!window.confirm('Restart the session to apply the variables?\n\nThe conversation resumes with --resume; if Claude was working, that task is interrupted.')) return
     await window.clawhip.restartSession(sessionId)
     setDirty(false)
     onClose()
@@ -38,25 +41,32 @@ export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
       <div className="modal wide" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
         <h2>{title}</h2>
         <p className="muted small">
-          Se pasan como variables de entorno al proceso de Claude. Los valores nunca se muestran: solo se pueden reemplazar o
-          borrar. Claude recibe la instrucción de usarlas solo por nombre y se le bloquean los comandos que vuelcan el entorno
-          (env, printenv…), pero eso no impide que un comando puntual las imprima.
+          They are passed to the Claude process as environment variables. Secret values are never shown: you can only replace or
+          delete them. Claude is told to use them by name only, and commands that dump the environment (env, printenv…) are
+          blocked, but that does not stop a specific command from printing them.
         </p>
         <EnvEditor scope={scope} inherited={inherited} onChange={() => setDirty(true)} />
-        {dirty && (sessionId ? running : true) && (
+        {dirty && AUTO_RESTART && (
           <div className="env-apply">
             {sessionId
-              ? 'La sesión está abierta: toma los cambios al reiniciarla.'
-              : 'Las sesiones abiertas de esta carpeta toman los cambios al reiniciarlas (⋮ de la sesión → Reiniciar).'}
+              ? 'The session restarts automatically to apply the change. If Claude is working or waiting for you, it restarts when it finishes.'
+              : 'Running sessions in this folder restart automatically. Busy ones (working or waiting for you) restart when Claude finishes.'}
+          </div>
+        )}
+        {dirty && !AUTO_RESTART && (sessionId ? running : true) && (
+          <div className="env-apply">
+            {sessionId
+              ? 'The session is running: it picks up the changes when restarted.'
+              : 'Running sessions in this folder pick up the changes when restarted (session ⋮ → Restart).'}
             {sessionId && (
               <button className="primary" onClick={restart}>
-                Reiniciar sesión
+                Restart session
               </button>
             )}
           </div>
         )}
         <div className="actions">
-          <button onClick={onClose}>Cerrar</button>
+          <button onClick={onClose}>Close</button>
         </div>
       </div>
     </div>

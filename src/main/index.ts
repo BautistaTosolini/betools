@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -11,9 +11,11 @@ import { openArtifact, revealArtifact } from './artifact-opener'
 import { StatusTracker } from './status-tracker'
 import { SettingsStore } from './settings'
 import { discoverSessions } from './discover'
+import { migrateLegacyData } from './migrate'
 import { TabTitles } from './titles'
+import { DailyTokenCounter, StatusLineWatcher } from './usage'
 import { awsProfiles, LocalSecrets, resolveEnv, resolveRef, validateName } from './secrets'
-import type { EnvScope, EnvSource, Folder, FolderSuggestion, SavedCommand, Session, SessionStatus, Settings } from '../shared/types'
+import type { EnvScope, EnvSource, Folder, FolderSuggestion, SavedCommand, Session, SessionMeta, SessionStatus, Settings } from '../shared/types'
 
 // Dos instancias reanudarían las mismas sesiones y escribirían el mismo transcript.
 if (!app.requestSingleInstanceLock()) app.exit(0)
@@ -33,6 +35,73 @@ let watcher: TranscriptWatcher
 let status: StatusTracker
 let titles: TabTitles
 let secrets: LocalSecrets
+let lines: StatusLineWatcher
+let daily: DailyTokenCounter
+
+// "claude-opus-5-5" → "Opus 5.5"; "claude-sonnet-4-5-20250929" → "Sonnet 4.5". Solo para cuando
+// todavía no hay status line (sesión sin lanzar): ahí Claude Code da el nombre visible.
+function prettyModel(id: string | null): string | null {
+  if (!id) return null
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?(\[1m\])?$/.exec(id)
+  if (!m) return id
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? '.' + m[3] : ''}${m[4] ? ' (1M)' : ''}`
+}
+
+// Reinicio automático al cambiar variables. Si la sesión está trabajando o esperando una respuesta tuya
+// (permiso, pregunta, selección), se espera a que termine. Debounce para que agregar varias variables
+// seguidas reinicie una sola vez.
+const pendingRestart = new Set<string>()
+const restartTimers = new Map<string, NodeJS.Timeout>()
+
+function restartNow(id: string): void {
+  const session = store.find(id)
+  if (!session) return
+  const size = ptys.size(id) ?? { cols: 120, rows: 40 }
+  ptys.kill(id)
+  send('pty:reset', id)
+  ptys.attach(session, size.cols, size.rows)
+}
+
+function setPending(id: string, on: boolean): void {
+  if (on === pendingRestart.has(id)) return
+  if (on) pendingRestart.add(id)
+  else pendingRestart.delete(id)
+  send('session:pendingRestart', id, on)
+}
+
+function applyRestart(id: string): void {
+  if (!ptys.isRunning(id)) return setPending(id, false)
+  const st = status.get(id)
+  if (st === 'working' || st === 'waiting') return setPending(id, true)
+  setPending(id, false)
+  restartNow(id)
+}
+
+// Sesiones que usan las variables de un ámbito: la sesión misma, o las de la carpeta.
+function sessionsUsing(scope: EnvScope): Session[] {
+  if (scope.kind === 'session') return store.get().sessions.filter((s) => s.id === scope.id)
+  return store.get().sessions.filter((s) => envLayers(s).some((l) => l.scope.kind === 'folder' && l.scope.id === scope.id))
+}
+
+function envChanged(scope: EnvScope): void {
+  for (const s of sessionsUsing(scope)) {
+    // Sin proceso no hay nada que reiniciar: toma las variables al arrancar.
+    if (!ptys.isRunning(s.id)) continue
+    clearTimeout(restartTimers.get(s.id))
+    restartTimers.set(
+      s.id,
+      setTimeout(() => {
+        restartTimers.delete(s.id)
+        applyRestart(s.id)
+      }, 1500)
+    )
+  }
+}
+
+function metaOf(id: string): SessionMeta {
+  const live = lines.getMeta(id)
+  return { model: live?.model ?? prettyModel(watcher.model(id)), contextPct: live?.contextPct ?? null }
+}
 
 // Capas de variables de una sesión: primero las de su carpeta, después las propias (pisan).
 // La carpeta se calcula igual que en la interfaz: el path (principal o adicional) más largo.
@@ -58,17 +127,17 @@ function envLayers(session: Session): { scope: EnvScope; vars: import('../shared
 function checkSource(src: EnvSource): EnvSource {
   if (src.kind === 'local') return { kind: 'local' }
   if (src.kind === 'plain') {
-    if (typeof src.value !== 'string') throw new Error('Escribe el valor.')
+    if (typeof src.value !== 'string') throw new Error('Enter the value.')
     return { kind: 'plain', value: src.value }
   }
   const profile = src.profile?.trim()
-  if (!profile) throw new Error('Elige el perfil de AWS.')
+  if (!profile) throw new Error('Choose the AWS profile.')
   const region = src.region?.trim() || undefined
   if (src.kind === 'aws-sm') {
-    if (!src.secretId?.trim()) throw new Error('Indica el nombre o ARN del secreto.')
+    if (!src.secretId?.trim()) throw new Error('Enter the secret name or ARN.')
     return { kind: 'aws-sm', profile, region, secretId: src.secretId.trim(), jsonKey: src.jsonKey?.trim() || undefined }
   }
-  if (!src.name?.trim()) throw new Error('Indica el nombre del parámetro.')
+  if (!src.name?.trim()) throw new Error('Enter the parameter name.')
   return { kind: 'aws-ssm', profile, region, name: src.name.trim() }
 }
 
@@ -81,7 +150,7 @@ const emitTitle = (id: string) => {
 }
 
 function assertDir(path: string): void {
-  if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`No existe la carpeta ${path}`)
+  if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Folder not found: ${path}`)
 }
 
 // Paths adicionales: se normalizan, sin duplicados ni el principal. Pueden no existir ya
@@ -144,7 +213,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1500,
     height: 920,
-    title: 'clawhip',
+    title: 'betools',
     icon: ICON,
     show: !startHidden,
     backgroundColor: '#0f0f0f',
@@ -153,6 +222,18 @@ function createWindow(): void {
       sandbox: false,
       contextIsolation: true
     }
+  })
+
+  // La ventana nunca navega fuera de la app (p. ej. un link en la vista Rendered): se abre afuera.
+  win.webContents.on('will-navigate', (e, url) => {
+    if (url !== win?.webContents.getURL()) {
+      e.preventDefault()
+      if (/^(https?:|mailto:)/i.test(url)) void shell.openExternal(url)
+    }
+  })
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?:|mailto:)/i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
   })
 
   // Sin menú: el menú por defecto de Electron captura Ctrl+R, Ctrl+W, etc., que Claude usa.
@@ -190,10 +271,10 @@ function updateTray(): void {
   if (!tray) return
   const sessions = store.get().sessions
   const waiting = sessions.filter((s) => status.get(s.id) === 'waiting').length
-  tray.setToolTip(waiting ? `clawhip — ${waiting} esperando respuesta` : 'clawhip')
+  tray.setToolTip(waiting ? `betools — ${waiting} waiting for input` : 'betools')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Mostrar', click: showWindow },
+      { label: 'Show', click: showWindow },
       { type: 'separator' },
       ...sessions.map((s) => ({
         label: `${TRAY_LABEL[status.get(s.id)] ?? '  '} ${labelOf(s)}`,
@@ -201,7 +282,7 @@ function updateTray(): void {
       })),
       { type: 'separator' },
       {
-        label: 'Salir (termina las sesiones)',
+        label: 'Quit (stops the sessions)',
         click: () => {
           quitting = true
           app.quit()
@@ -235,7 +316,7 @@ function notify(id: string, next: SessionStatus): void {
   if (!session) return
   // No se avisa de la sesión que estás mirando.
   if (win?.isVisible() && win.isFocused() && store.get().selectedId === id) return
-  const body = next === 'waiting' ? 'Necesita tu respuesta' : 'Terminó'
+  const body = next === 'waiting' ? 'Needs your input' : 'Done'
   const n = new Notification({ title: labelOf(session), body, icon: ICON, urgency: next === 'waiting' ? 'critical' : 'normal' })
   n.on('click', () => selectFromOutside(id))
   n.show()
@@ -303,7 +384,7 @@ function registerIpc(): void {
     if (!session) return []
     return envLayers(session).map((l) => ({
       scope: l.scope,
-      label: l.scope.kind === 'folder' ? store.get().folders.find((f) => f.id === l.scope.id)?.name ?? '' : 'sesión',
+      label: l.scope.kind === 'folder' ? store.get().folders.find((f) => f.id === l.scope.id)?.name ?? '' : 'session',
       vars: l.vars
     }))
   })
@@ -312,16 +393,18 @@ function registerIpc(): void {
     const src = checkSource(source)
     if (src.kind === 'local') {
       // Reemplazar el origen sin valor nuevo no está permitido para "local": hace falta el valor.
-      if (typeof value !== 'string' || value === '') throw new Error('Escribe el valor.')
+      if (typeof value !== 'string' || value === '') throw new Error('Enter the value.')
       secrets.set(scope, name, value)
     } else {
       secrets.delete(scope, name) // si antes era local, se borra el valor cifrado
     }
     store.setEnv(scope, { name, source: src, updatedAt: new Date().toISOString() })
+    envChanged(scope)
   })
   ipcMain.handle('env:delete', (_e, scope: EnvScope, name: string) => {
     secrets.delete(scope, name)
     store.deleteEnv(scope, name)
+    envChanged(scope)
   })
   // Prueba una referencia de AWS: solo informa si se pudo leer y el largo, nunca el valor.
   ipcMain.handle('env:test', async (_e, source: EnvSource) => {
@@ -339,12 +422,14 @@ function registerIpc(): void {
   })
   // Reinicia el proceso de la sesión para que tome las variables nuevas (retoma con --resume).
   ipcMain.handle('sessions:restart', (_e, id: string) => {
-    const session = store.find(id)
-    if (!session) return
-    const size = ptys.size(id) ?? { cols: 120, rows: 40 }
-    ptys.kill(id)
-    send('pty:reset', id)
-    ptys.attach(session, size.cols, size.rows)
+    setPending(id, false)
+    restartNow(id)
+  })
+  ipcMain.handle('sessions:pendingRestart', () => [...pendingRestart])
+  ipcMain.handle('conversation:get', (_e, id: string) => watcher.conversation(id))
+  // Links de la vista Rendered: solo http(s) y mailto, en el navegador del sistema.
+  ipcMain.handle('shell:openExternal', (_e, url: string) => {
+    if (/^(https?:|mailto:)/i.test(url)) return shell.openExternal(url)
   })
   ipcMain.handle('sessions:running', (_e, id: string) => ptys.isRunning(id))
   ipcMain.handle('folders:suggest', () => suggestFolders())
@@ -352,8 +437,8 @@ function registerIpc(): void {
   ipcMain.handle('sessions:discover', () => discoverSessions(new Set(store.get().sessions.map((s) => s.id))))
 
   ipcMain.handle('sessions:import', (_e, id: string, cwd: string, name: string): Session => {
-    if (store.find(id)) throw new Error('La sesión ya está en la lista')
-    if (!existsSync(cwd)) throw new Error(`La carpeta de la sesión ya no existe: ${cwd}`)
+    if (store.find(id)) throw new Error('The session is already in the list')
+    if (!existsSync(cwd)) throw new Error(`The session folder no longer exists: ${cwd}`)
     const now = new Date().toISOString()
     return addSession({ id, name: name.trim() || basename(cwd), cwd, createdAt: now, lastActiveAt: now })
   })
@@ -365,6 +450,10 @@ function registerIpc(): void {
     watcher.unwatch(id)
     titles.unwatch(id)
     status.forget(id)
+    lines.forget(id)
+    clearTimeout(restartTimers.get(id))
+    restartTimers.delete(id)
+    pendingRestart.delete(id)
     store.remove(id)
     updateTray()
   })
@@ -376,6 +465,12 @@ function registerIpc(): void {
     store.select(id)
     status.seen(id)
   })
+
+  ipcMain.handle('usage:get', () => ({
+    limits: lines.getLimits(),
+    daily: daily.get(),
+    meta: Object.fromEntries(store.get().sessions.map((s) => [s.id, metaOf(s.id)]))
+  }))
 
   ipcMain.handle('settings:get', () => settings.get())
   ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settings.update(patch))
@@ -434,16 +529,26 @@ function registerIpc(): void {
 app.on('second-instance', showWindow)
 
 app.whenReady().then(() => {
+  migrateLegacyData()
   store = new SessionStore()
   settings = new SettingsStore()
   secrets = new LocalSecrets()
   status = new StatusTracker(join(app.getPath('userData'), 'status'), (id, next) => {
     send('session:status', id, next)
     updateTray()
+    // Reinicio pendiente por cambio de variables: se hace cuando Claude termina el turno.
+    if (pendingRestart.has(id)) {
+      if (next === 'exited') setPending(id, false)
+      else if (next === 'idle' || next === 'done') setTimeout(() => applyRestart(id), 1000)
+    }
     if (next === 'waiting' || next === 'done') notify(id, next)
   })
   ptys = new PtyManager({
-    onSpawn: (id) => status.start(id),
+    onSpawn: (id) => {
+      const file = status.start(id)
+      lines.watch(id, file)
+      return file
+    },
     onData: (id, data) => send('pty:data', id, data),
     onExit: (id, code) => {
       status.exited(id)
@@ -456,10 +561,18 @@ app.whenReady().then(() => {
     onExit: (key, code) => send('pty:exit', key, code),
     resolveEnv: (session) => resolveEnv(envLayers(session), secrets)
   })
+  lines = new StatusLineWatcher(
+    join(app.getPath('userData'), 'plan-limits.json'),
+    (id) => send('session:meta', id, metaOf(id)),
+    (limits) => send('usage:limits', limits)
+  )
   watcher = new TranscriptWatcher(
     (id, artifacts) => send('artifacts:changed', id, artifacts),
-    (id) => emitTitle(id)
+    (id) => emitTitle(id),
+    (id) => send('session:meta', id, metaOf(id)),
+    (id, start, items) => send('conversation:changed', id, start, items)
   )
+  daily = new DailyTokenCounter((t) => send('usage:daily', t))
   titles = new TabTitles((id) => emitTitle(id))
   for (const s of store.get().sessions) {
     watcher.watch(s)
@@ -468,6 +581,7 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
+  daily.start()
   createTray()
 
   // Opcional: levantar todas las sesiones al iniciar (por defecto se levantan al seleccionarlas).

@@ -10,7 +10,7 @@ export interface KebabItem {
 export function Kebab({
   items,
   children,
-  title = 'Más acciones',
+  title = 'More actions',
   label
 }: {
   items?: KebabItem[]

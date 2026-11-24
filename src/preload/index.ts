@@ -1,5 +1,5 @@
-import { clipboard, contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { Artifact, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
+import { clipboard, contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
+import type { Artifact, ConversationItem, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
 
 function on<T extends unknown[]>(channel: string, cb: (...args: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, ...args: unknown[]) => cb(...(args as T))
@@ -8,6 +8,8 @@ function on<T extends unknown[]>(channel: string, cb: (...args: T) => void): () 
 }
 
 const api = {
+  // Al cambiar variables, el proceso principal reinicia las sesiones afectadas (ver envChanged).
+  autoRestart: true,
   listSessions: (): Promise<
     StoreState & { status: Record<string, SessionStatus>; titles: Record<string, string | null> }
   > => ipcRenderer.invoke('sessions:list'),
@@ -63,6 +65,21 @@ const api = {
   runCommand: (sessionId: string, command: string): Promise<void> => ipcRenderer.invoke('shell:run', sessionId, command),
   setFolderCommands: (folderId: string, commands: SavedCommand[]): Promise<Folder> =>
     ipcRenderer.invoke('folders:setCommands', folderId, commands),
+
+  getUsage: (): Promise<{ limits: PlanLimits | null; daily: DailyTokens; meta: Record<string, SessionMeta> }> =>
+    ipcRenderer.invoke('usage:get'),
+  onMeta: (cb: (id: string, meta: SessionMeta) => void) => on('session:meta', cb),
+  onLimits: (cb: (limits: PlanLimits) => void) => on('usage:limits', cb),
+  onDaily: (cb: (daily: DailyTokens) => void) => on('usage:daily', cb),
+
+  getConversation: (id: string): Promise<ConversationItem[]> => ipcRenderer.invoke('conversation:get', id),
+  onConversation: (cb: (id: string, start: number, items: ConversationItem[]) => void) => on('conversation:changed', cb),
+  openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
+  pendingRestarts: (): Promise<string[]> => ipcRenderer.invoke('sessions:pendingRestart'),
+  onPendingRestart: (cb: (id: string, on: boolean) => void) => on('session:pendingRestart', cb),
+
+  // Zoom de toda la ventana (el del chat se hace en el renderer).
+  setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 
   readClipboard: () => clipboard.readText(),
   writeClipboard: (text: string) => clipboard.writeText(text)

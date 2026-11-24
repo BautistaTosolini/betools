@@ -8,15 +8,15 @@ type Kind = EnvSource['kind']
 const ALLOWED = (window.clawhip as { envKinds?: Kind[] }).envKinds
 
 const KIND_LABEL: Record<Kind, string> = {
-  plain: 'Visible (no secreta)',
-  local: 'Valor local cifrado',
+  plain: 'Visible (not secret)',
+  local: 'Encrypted local value',
   'aws-sm': 'AWS Secrets Manager',
   'aws-ssm': 'AWS SSM Parameter Store'
 }
 
 export function describeSource(s: EnvSource): string {
   if (s.kind === 'plain') return 'visible'
-  if (s.kind === 'local') return 'local cifrado'
+  if (s.kind === 'local') return 'encrypted local'
   if (s.kind === 'aws-sm') return `Secrets Manager · ${s.secretId}${s.jsonKey ? ` → ${s.jsonKey}` : ''} · ${s.profile}${s.region ? ` · ${s.region}` : ''}`
   return `SSM · ${s.name} · ${s.profile}${s.region ? ` · ${s.region}` : ''}`
 }
@@ -81,10 +81,10 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
   }
 
   const runTest = async () => {
-    setTest('Probando…')
+    setTest('Testing…')
     try {
       const r = await api.testEnvRef(source())
-      setTest(`OK: se pudo leer (${r.length} caracteres). El valor no se muestra.`)
+      setTest(`OK: read successfully (${r.length} characters). The value is not shown.`)
     } catch (e) {
       setTest(`Error: ${errMsg(e)}`)
     }
@@ -94,7 +94,7 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
     <div className="env-form" onKeyDown={(e) => e.key === 'Escape' && onCancel()}>
       <div className="env-grid">
         <label>
-          Nombre
+          Name
           <input
             value={name}
             disabled={!!existing}
@@ -104,7 +104,7 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
           />
         </label>
         <label>
-          Origen
+          Source
           <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
             {(Object.keys(KIND_LABEL) as Kind[]).filter((k) => !ALLOWED || ALLOWED.includes(k)).map((k) => (
               <option key={k} value={k} disabled={k === 'local' && !secure.ok}>
@@ -118,15 +118,15 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
       {kind === 'plain' ? (
         <>
           <label>
-            Valor
+            Value
             <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="vemo-prd" spellCheck={false} autoFocus={!!existing} />
           </label>
-          <p className="muted small">Se guarda en texto plano y se ve en la interfaz. No la uses para secretos.</p>
+          <p className="muted small">Stored as plain text and shown in the UI. Do not use it for secrets.</p>
         </>
       ) : kind === 'local' ? (
         <>
           <label>
-            Valor {existing && <span className="muted small">(el actual no se muestra; escribe uno nuevo para reemplazarlo)</span>}
+            Value {existing && <span className="muted small">(the current one is not shown; type a new one to replace it)</span>}
             <input
               type="password"
               autoComplete="off"
@@ -138,7 +138,7 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
             />
           </label>
           <p className="warn small">
-            Solo para valores propios. Las credenciales de clientes no se guardan en el equipo: usa una referencia a AWS.
+            Only for your own values. Client credentials must not be stored on this machine: use an AWS reference.
           </p>
           {!secure.ok && <p className="error small">{secure.reason}</p>}
         </>
@@ -146,8 +146,8 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
         <>
           <div className="env-grid">
             <label>
-              Perfil de AWS
-              <input list="aws-profiles" value={profile} onChange={(e) => setProfile(e.target.value)} placeholder="cliente-prd-ro" />
+              AWS profile
+              <input list="aws-profiles" value={profile} onChange={(e) => setProfile(e.target.value)} placeholder="client-prd-ro" />
               <datalist id="aws-profiles">
                 {profiles.map((p) => (
                   <option key={p} value={p} />
@@ -155,39 +155,39 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
               </datalist>
             </label>
             <label>
-              Región <span className="muted small">(opcional)</span>
-              <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="la del perfil" />
+              Region <span className="muted small">(optional)</span>
+              <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="profile default" />
             </label>
           </div>
           {kind === 'aws-sm' ? (
             <div className="env-grid">
               <label>
-                Secreto (nombre o ARN)
+                Secret (name or ARN)
                 <input value={secretId} onChange={(e) => setSecretId(e.target.value)} placeholder="prod/api/token" />
               </label>
               <label>
-                Clave JSON <span className="muted small">(opcional)</span>
+                JSON key <span className="muted small">(optional)</span>
                 <input value={jsonKey} onChange={(e) => setJsonKey(e.target.value)} placeholder="token" />
               </label>
             </div>
           ) : (
             <label>
-              Parámetro
-              <input value={param} onChange={(e) => setParam(e.target.value)} placeholder="/cliente/prod/token" />
+              Parameter
+              <input value={param} onChange={(e) => setParam(e.target.value)} placeholder="/client/prod/token" />
             </label>
           )}
-          <p className="muted small">El valor se lee al lanzar la sesión y no se guarda en el equipo.</p>
+          <p className="muted small">The value is read when the session starts and is not stored on this machine.</p>
           {test && <p className={`small ${test.startsWith('OK') ? 'ok' : test.startsWith('Error') ? 'error' : 'muted'}`}>{test}</p>}
         </>
       )}
 
       {error && <p className="error small">{error}</p>}
       <div className="actions">
-        {(kind === 'aws-sm' || kind === 'aws-ssm') && <button onClick={runTest}>Probar</button>}
+        {(kind === 'aws-sm' || kind === 'aws-ssm') && <button onClick={runTest}>Test</button>}
         <span style={{ flex: 1 }} />
-        <button onClick={onCancel}>Cancelar</button>
+        <button onClick={onCancel}>Cancel</button>
         <button className="primary" disabled={busy} onClick={save}>
-          {existing ? (kind === 'plain' ? 'Guardar' : 'Reemplazar') : 'Agregar'}
+          {existing ? (kind === 'plain' ? 'Save' : 'Replace') : 'Add'}
         </button>
       </div>
     </div>
@@ -218,7 +218,7 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
   }
 
   const remove = async (v: EnvVarMeta) => {
-    if (!window.confirm(`¿Borrar la variable ${v.name}?${v.source.kind === 'local' ? '\n\nEl valor cifrado se elimina.' : ''}`)) return
+    if (!window.confirm(`Delete the variable ${v.name}?${v.source.kind === 'local' ? '\n\nThe encrypted value is removed.' : ''}`)) return
     try {
       await api.deleteEnv(scope, v.name)
       await done()
@@ -237,12 +237,12 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
             <li key={v.name} className={own.has(v.name) ? 'overridden' : ''}>
               <span className="env-name">{v.name}</span>
               <span className="env-src">
-                heredada de {inherited.label} · {v.source.kind === 'plain' ? v.source.value : describeSource(v.source)}
-                {own.has(v.name) && ' · pisada en esta sesión'}
+                inherited from {inherited.label} · {v.source.kind === 'plain' ? v.source.value : describeSource(v.source)}
+                {own.has(v.name) && ' · overridden in this session'}
               </span>
               {!own.has(v.name) && (
                 <button className="btn-sm" onClick={() => setForm({ name: v.name })}>
-                  Pisar
+                  Override
                 </button>
               )}
             </li>
@@ -256,29 +256,29 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
             {v.source.kind === 'plain' ? (
               <span className="env-value plain">{v.source.value}</span>
             ) : (
-              <span className="env-value" title="El valor no se muestra">
+              <span className="env-value" title="The value is not shown">
                 ••••••••
               </span>
             )}
             <span className="env-src">{describeSource(v.source)}</span>
             <span className="env-actions">
               <button className="btn-sm" onClick={() => setForm({ existing: v })}>
-                {v.source.kind === 'plain' ? 'Editar' : 'Reemplazar'}
+                {v.source.kind === 'plain' ? 'Edit' : 'Replace'}
               </button>
               <button className="btn-sm danger" onClick={() => remove(v)}>
-                Borrar
+                Delete
               </button>
             </span>
           </li>
         ))}
-        {vars.length === 0 && !form && <li className="empty">Sin variables propias.</li>}
+        {vars.length === 0 && !form && <li className="empty">No variables of its own.</li>}
       </ul>
       {error && <p className="error small">{error}</p>}
       {form ? (
         <EnvForm scope={scope} existing={form.existing} initialName={form.name} onDone={done} onCancel={() => setForm(null)} />
       ) : (
         <button onClick={() => setForm({})}>
-          <span className="plus">+</span> Agregar variable
+          <span className="plus">+</span> Add variable
         </button>
       )}
     </div>
