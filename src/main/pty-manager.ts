@@ -46,6 +46,8 @@ export interface PtyEvents {
   onExit(id: string, code: number): void
   // Variables de entorno de la sesión (carpeta + propias), resueltas al lanzar.
   resolveEnv(session: Session): Promise<ResolvedEnv>
+  // Remote Control: null = apagado; '' = encendido sin nombre; texto = nombre visible en claude.ai/el teléfono.
+  remoteControlName(session: Session): string | null
 }
 
 // Instrucción para Claude cuando la sesión tiene variables con secretos.
@@ -127,6 +129,10 @@ export class PtyManager {
       : ['--session-id', session.id, '--name', session.name]
     args.push('--settings', buildSettings(resolved.names.length > 0))
     if (resolved.names.length) args.push('--append-system-prompt', secretsPrompt(resolved.names))
+    // Va al final: el nombre es opcional y, sin él, el flag no debe tomar el argumento siguiente.
+    // Doc: https://code.claude.com/docs/en/remote-control
+    const rc = this.events.remoteControlName(session)
+    if (rc !== null) args.push('--remote-control', ...(rc ? [rc] : []))
     const statusFile = this.events.onSpawn(session.id)
 
     const proc = pty.spawn(claudeBin(), args, {

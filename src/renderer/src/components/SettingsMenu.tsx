@@ -5,7 +5,8 @@ const OPTIONS: { key: keyof Settings; label: string; hint: string }[] = [
   { key: 'autostart', label: 'Open at login', hint: 'Starts hidden in the tray' },
   { key: 'closeToTray', label: 'Close to tray', hint: 'The X hides the window; sessions keep running' },
   { key: 'notifications', label: 'Notifications', hint: 'When a session finishes or asks for permission' },
-  { key: 'eagerStart', label: 'Start all on launch', hint: 'Otherwise each one starts when selected' }
+  { key: 'eagerStart', label: 'Start all on launch', hint: 'Otherwise each one starts when selected' },
+  { key: 'remoteControl', label: 'Remote Control', hint: 'Every session, new or resumed, can be used from claude.ai and the phone. Applies on (re)start' }
 ]
 
 export function SettingsMenu() {

@@ -233,3 +233,67 @@ clawhip/
   `zoom`; en las terminales cambia el tamaño de letra de xterm y reacomoda la grilla del pty.
 - Control en la barra de título (muestra el % si no es 100) con − / % (vuelve a 100) / + para cada uno.
 - Se recuerda por equipo en localStorage (`zoomApp`, `zoomChat`). Pasos: 50 %–250 %.
+
+## v0.7.0 — Visor de Markdown + logo nuevo
+
+- Los `.md` del panel de artefactos se abren como pestañas cerrables en la columna central (después de
+  Rendered / Terminal / CLI). Se recuerdan por sesión (localStorage `docTabs`), se actualizan solas cuando el
+  archivo cambia (`doc:watch`, polling de 1 s, hasta 5 MB) y respetan el zoom del chat.
+  Cerrar: ×, clic del medio o Ctrl+W (solo con un documento activo). Links a otro `.md` abren otra pestaña.
+- `Markdown.tsx`: renderer compartido entre Rendered y el visor.
+- Logo: "B" geométrica blanca sobre fondo casi negro con acento ámbar (`resources/icon.svg`); también en la
+  barra de título. CSP: `img-src 'self' data:` para el SVG embebido.
+
+## v0.8.0 — Borradores, pegados y varios tickets por sesión
+
+- Borrador de Rendered por sesión (`drafts.ts`, localStorage): no se pierde al cambiar de pestaña, de sesión ni
+  al reiniciar. Al pasar a la CLI se mueve al prompt de Claude (sin Enter) y al volver se trae de vuelta
+  (se lee la caja del prompt de la pantalla y se vacía con Ctrl+U). Si el prompt tiene un pegado colapsado
+  ("[Pasted text #1]") queda en la CLI y Rendered lo muestra en un aviso con "Send it" / "Open CLI".
+- Los `<pasted_content>` de tus mensajes se muestran como bloque desplegable "Pasted text".
+- Títulos con varios tickets: `<KEY-principal> <KEY> [<KEY>] <resumen>`; un chip por ticket.
+
+## v0.9.0 — Autocompletado, encolados y lo que faltaba en Rendered
+
+- Autocompletado de `/` en Rendered (comandos de Claude Code, skills y comandos propios, del proyecto y de plugins).
+  Lista completa desde el mensaje `init` de `claude -p --output-format stream-json`, con la API apuntando a
+  `127.0.0.1:9` para que no haya llamada al modelo (sin sesión guardada ni hooks); descripciones desde los
+  `SKILL.md`/comandos en disco. Caché de 10 minutos por carpeta. Si el sondeo falla, se usa la lista del disco.
+- Menús: elegir una opción mueve el cursor con flechas y confirma (antes mandaba el número, que en algunos menús
+  se escribía como texto y se acumulaba, p. ej. "33311"). Bloqueo síncrono tras elegir.
+- Mensajes encolados (los que mandás mientras Claude trabaja): se ven al final de Rendered mientras esperan; los
+  que Claude toma a mitad del turno (`attachment` `queued_command`) quedan como mensajes tuyos.
+- Respuestas a AskUserQuestion (`toolUseResult.answers`) como bloque "You answered Claude's questions".
+- Comandos locales (`system`/`local_command`, p. ej. /context) con su salida desplegable.
+- Barra de estado en curso ("Harmonizing… (11m 26s · ↓ 57.5k tokens)") leída de la pantalla.
+
+## v0.10.0 — Texto en cascada en Rendered
+
+- Las respuestas nuevas de Claude aparecen palabra por palabra, como en la CLI (`useReveal` en `Markdown.tsx`):
+  ritmo fijo en mensajes cortos, se acelera para terminar en ~2 s en los largos. El transcript solo recibe bloques
+  completos, así que es una animación del bloque, no streaming real del modelo.
+- Solo se anima lo que llega mientras mirás Rendered (no el historial ni lo que llegó en otra pestaña).
+  Sin animación con "reducir movimiento". El scroll sigue el final si estabas abajo.
+
+## v0.11.0 — Remote Control en todas las sesiones
+
+- Cada sesión que lanza betools (nueva o con `--resume`) arranca con `--remote-control "<título de betools>"`
+  (sin título, sin nombre: Claude lo nombra con la conversación). Así aparece con el ticket en claude.ai/code y
+  en la app del teléfono. Probado con `--resume`: la TUI muestra "/remote-control is active".
+- Ajuste "Remote Control" (por defecto encendido). Aplica al (re)iniciar cada sesión.
+- Doc: https://code.claude.com/docs/en/remote-control (requiere login de claude.ai; en Team/Enterprise un Owner
+  lo habilita en la configuración de admin; no funciona con API key ni con ANTHROPIC_BASE_URL propia).
+- La versión web no lo activa.
+
+## v0.12.0 — Esc para detener en Rendered y barra de consumo estable
+
+- Esc detiene a Claude (o cierra el menú) desde cualquier parte de Rendered, no solo con el foco en la caja
+  vacía. No actúa si el autocompletado está abierto (ahí lo cierra), ni con el foco en otro campo o diálogo.
+  Ctrl+C sigue siendo copiar. Se descartó Ctrl+X porque es "cortar".
+- La interrupción no dispara el hook Stop (https://code.claude.com/docs/en/hooks#stop): se detecta por la línea
+  "[Request interrupted by user" del transcript y la sesión vuelve a "idle" al instante (antes quedaba en
+  "working" hasta el aviso de inactividad). En Rendered se muestra como separador "Interrupted by user".
+- Límites 5 h / semanal: cada sesión repetía cada 30 s la lectura de su última respuesta, así que una sesión
+  quieta pisaba el valor con uno viejo (subía y bajaba). Ahora se combina por ventana (resets_at): dentro de la
+  misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
+- Tokens del día: escaneo cada 10 s (antes 30 s).

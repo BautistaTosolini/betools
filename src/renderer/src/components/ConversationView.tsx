@@ -1,69 +1,51 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Marked } from 'marked'
-import DOMPurify from 'dompurify'
-import type { ConversationItem, SessionStatus } from '../../../shared/types'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Markdown } from './Markdown'
+import type { ConversationItem, SessionStatus, SlashCommand } from '../../../shared/types'
 import { onScreen, screenLines } from '../term-registry'
 import { KEYS, parseMenu, type Menu } from '../menu-parser'
 import { useZoom } from '../zoom'
+import { useDraft } from '../drafts'
+import { readActivity, readCliInput, readQueued, type Activity, type CliInput } from '../term-registry'
 
 const api = window.clawhip
 
-// Vista de solo lectura de la conversación (leída del transcript). El Markdown se pasa a HTML y se
-// sanea con DOMPurify; los bloques ```html se muestran además como vista previa en un iframe aislado
-// (sandbox sin scripts) para que sus estilos no afecten a la app.
+// Vista de la conversación (leída del transcript) con caja de respuesta y menús de Claude.
 
-const md = new Marked({ gfm: true, breaks: false })
-md.use({
-  renderer: {
-    code(token) {
-      if ((token.lang ?? '').toLowerCase() !== 'html' || !token.text.trim()) return false
-      const src = encodeURIComponent(token.text)
-      const code = token.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      return `<div class="html-preview" data-src="${src}"></div><details class="html-source"><summary>HTML source</summary><pre><code>${code}</code></pre></details>`
-    }
+// Claude Code guarda lo que pegás envuelto en <pasted_content id="…">…</pasted_content>: se muestra como un
+// bloque desplegable en vez de las etiquetas.
+const PASTE_RE = /<pasted_content id="([^"]*)">\n?([\s\S]*?)\n?<\/pasted_content(?: id="[^"]*")?>/g
+
+function UserText({ text }: { text: string }) {
+  const parts: { kind: 'text' | 'paste'; text: string }[] = []
+  let last = 0
+  for (const m of text.matchAll(PASTE_RE)) {
+    const before = text.slice(last, m.index).trim()
+    if (before) parts.push({ kind: 'text', text: before })
+    parts.push({ kind: 'paste', text: m[2] })
+    last = (m.index ?? 0) + m[0].length
   }
-})
-
-function toHtml(markdown: string): string {
-  const raw = md.parse(markdown, { async: false }) as string
-  return DOMPurify.sanitize(raw, { FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select'], ADD_ATTR: ['data-src'] })
+  const after = text.slice(last).trim()
+  if (after) parts.push({ kind: 'text', text: after })
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.kind === 'text' ? (
+          <div key={i} className="msg-text">
+            {p.text}
+          </div>
+        ) : (
+          <details key={i} className="paste">
+            <summary>
+              Pasted text <span className="muted">· {p.text.split('\n').length} lines</span>
+              <span className="paste-preview">{p.text.split('\n')[0].slice(0, 90)}</span>
+            </summary>
+            <pre>{p.text}</pre>
+          </details>
+        )
+      )}
+    </>
+  )
 }
-
-// Monta las vistas previas HTML dentro de iframes aislados y ajusta su alto al contenido.
-function mountPreviews(root: HTMLElement): void {
-  root.querySelectorAll<HTMLDivElement>('.html-preview[data-src]').forEach((el) => {
-    if (el.querySelector('iframe')) return
-    const frame = document.createElement('iframe')
-    // allow-same-origin sin allow-scripts: el HTML no puede ejecutar nada, pero se puede medir su alto.
-    frame.setAttribute('sandbox', 'allow-same-origin')
-    frame.srcdoc =
-      // Tema oscuro forzado (fondos y textos) para que todo combine con la app, aunque el HTML traiga los suyos.
-      // El <style> va al final para ganarle a los estilos del propio HTML.
-      '<!doctype html><meta charset="utf-8">' +
-      decodeURIComponent(el.dataset.src ?? '') +
-      '<style>:root{color-scheme:dark}html,body{background:#0f0f11!important;overflow:hidden}' +
-      'body{margin:8px;font:13px system-ui,sans-serif}' +
-      '*{background-color:transparent!important;color:#e9ebed!important;border-color:#414141!important;box-shadow:none!important}' +
-      'a,a *{color:#42b4ff!important}th,thead td{background-color:#242424!important}' +
-      'table{border-collapse:collapse}td,th{border:1px solid #414141;padding:4px 8px}</style>'
-    frame.onload = () => {
-      // Con alto 0 el scrollHeight es el del contenido (si no, nunca baja del alto actual del iframe).
-      frame.style.height = '0px'
-      const h = frame.contentDocument?.documentElement.scrollHeight ?? 200
-      frame.style.height = Math.min(Math.max(h, 40), 900) + 'px'
-    }
-    el.appendChild(frame)
-  })
-}
-
-const Markdown = memo(function Markdown({ text }: { text: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const html = useMemo(() => toHtml(text), [text])
-  useLayoutEffect(() => {
-    if (ref.current) mountPreviews(ref.current)
-  }, [html])
-  return <div ref={ref} className="md" dangerouslySetInnerHTML={{ __html: html }} />
-})
 
 const time = (iso: string) => {
   const d = new Date(iso)
@@ -138,8 +120,62 @@ function headerParts(lines: string[]) {
   return { tabs, rest, qi }
 }
 
+// Elegir una opción moviendo el cursor con flechas y confirmando, en vez de mandar el número: en algunos
+// menús (p. ej. la opción "Type something" de AskUserQuestion) el número se escribía como texto y se acumulaba.
+// Las teclas van de a una (la TUI no siempre separa varias secuencias llegadas juntas).
+function sendKeys(id: string, keys: string[], gap = 35): void {
+  keys.forEach((k, i) => setTimeout(() => api.input(id, k), i * gap))
+}
+
+export function chooseOption(id: string, menu: Menu, n: number): boolean {
+  const target = menu.options.findIndex((o) => o.n === n)
+  const cur = menu.options.findIndex((o) => o.selected)
+  if (target < 0) return false
+  const opt = menu.options[target]
+  const confirm = opt.checked !== null ? KEYS.space : KEYS.enter
+  if (cur < 0) {
+    sendKeys(id, [String(n)])
+    return true
+  }
+  const d = target - cur
+  sendKeys(id, [...Array(Math.abs(d)).fill(d > 0 ? KEYS.down : KEYS.up), confirm])
+  return true
+}
+
+// Tras elegir, las opciones quedan bloqueadas hasta que el menú cambie (o 1,5 s): un doble clic no
+// manda dos selecciones.
+// El ref bloquea al instante (dos clics en el mismo frame); el estado solo atenúa las opciones.
+function useMenuLock(menu: Menu): [boolean, () => boolean] {
+  const [locked, setLocked] = useState(false)
+  const ref = useRef(false)
+  const sig = JSON.stringify(menu)
+  useEffect(() => {
+    ref.current = false
+    setLocked(false)
+  }, [sig])
+  useEffect(() => {
+    if (!locked) return
+    const t = setTimeout(() => {
+      ref.current = false
+      setLocked(false)
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [locked])
+  const take = () => {
+    if (ref.current) return false
+    ref.current = true
+    setLocked(true)
+    return true
+  }
+  return [locked, take]
+}
+
 function MenuPanel({ id, menu }: { id: string; menu: Menu }) {
   const key = (k: string) => api.input(id, k)
+  const [locked, take] = useMenuLock(menu)
+  const choose = (n: number) => {
+    if (take()) chooseOption(id, menu, n)
+  }
   const { tabs, rest, qi } = headerParts(menu.header)
   const multiTab = tabs.length > 1
   return (
@@ -164,14 +200,15 @@ function MenuPanel({ id, menu }: { id: string; menu: Menu }) {
         )
       )}
       {menu.options.length > 0 && (
-        <div className="menu-options" role="listbox">
+        <div className={`menu-options ${locked ? 'locked' : ''}`} role="listbox">
           {menu.options.map((o) => (
             <button
               key={o.n}
               role="option"
               aria-selected={o.selected}
               className={`menu-option ${o.selected ? 'on' : ''}`}
-              onClick={() => key(String(o.n))}
+              disabled={locked}
+              onClick={() => choose(o.n)}
             >
               <kbd>{o.n}</kbd>
               {o.checked !== null && <span className={`menu-check ${o.checked ? 'on' : ''}`} />}
@@ -219,8 +256,78 @@ const MENU_KEYS: Record<string, string> = {
   ' ': KEYS.space
 }
 
+// Texto sin enviar que quedó en el prompt de la CLI (p. ej. un pegado largo que no se puede traer como texto).
+function useCliInput(id: string): CliInput | null {
+  const [v, setV] = useState<CliInput | null>(null)
+  useEffect(() => {
+    let raf = 0
+    const read = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const next = readCliInput(id)
+        setV((prev) => (prev?.text === next?.text ? prev : next))
+      })
+    }
+    read()
+    const off = onScreen(id, read)
+    return () => {
+      off()
+      cancelAnimationFrame(raf)
+    }
+  }, [id])
+  return v
+}
+
+// Lista de comandos por sesión (se pide una vez; el proceso principal la cachea por carpeta).
+const slashCache = new Map<string, Promise<SlashCommand[]>>()
+function loadSlash(id: string): Promise<SlashCommand[]> {
+  let p = slashCache.get(id)
+  if (!p) {
+    p = api.listSlashCommands(id).catch(() => [])
+    slashCache.set(id, p)
+    // Se vuelve a pedir pasados 10 minutos (skills nuevas, plugins).
+    setTimeout(() => slashCache.delete(id), 10 * 60_000)
+  }
+  return p
+}
+
+function rank(list: SlashCommand[], q: string): SlashCommand[] {
+  const query = q.toLowerCase()
+  if (!query) return list
+  const scored: [number, SlashCommand][] = []
+  for (const c of list) {
+    const n = c.name.toLowerCase()
+    const short = n.includes(':') ? n.slice(n.indexOf(':') + 1) : n
+    const score = n.startsWith(query) ? 0 : short.startsWith(query) ? 1 : n.includes(query) ? 2 : c.description.toLowerCase().includes(query) ? 3 : -1
+    if (score >= 0) scored.push([score, c])
+  }
+  return scored.sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).map((x) => x[1])
+}
+
+const SOURCE_LABEL: Record<SlashCommand['source'], string> = { builtin: 'claude', user: 'skill', project: 'project', plugin: 'plugin' }
+
 function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus; onOpenCli(): void }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useDraft(id)
+  const cli = useCliInput(id)
+  // Autocompletado de "/": activo mientras el texto es solo "/algo" (sin espacios).
+  const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null
+  const [commands, setCommands] = useState<SlashCommand[] | null>(null)
+  const [pick, setPick] = useState(0)
+  const [dismissed, setDismissed] = useState<string | null>(null)
+  useEffect(() => {
+    if (slashQuery !== null && commands === null) loadSlash(id).then(setCommands)
+  }, [slashQuery !== null, id])
+  const matches = useMemo(() => (slashQuery !== null && commands ? rank(commands, slashQuery).slice(0, 50) : []), [slashQuery, commands])
+  const showSlash = slashQuery !== null && dismissed !== text
+  useEffect(() => setPick(0), [slashQuery])
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    listRef.current?.querySelector('.slash-item.on')?.scrollIntoView({ block: 'nearest' })
+  }, [pick])
+  const accept = (c: SlashCommand) => {
+    setText(`/${c.name} `)
+    requestAnimationFrame(() => ref.current?.focus())
+  }
   const ref = useRef<HTMLTextAreaElement>(null)
   const menu = useMenu(id)
   const working = status === 'working'
@@ -239,6 +346,27 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
     if (menu) ref.current?.focus()
   }, [!!menu])
 
+  // Esc detiene a Claude (o cierra el menú) desde cualquier parte de Rendered, no solo con el foco en la caja.
+  // Ctrl+C queda para copiar. Se ignora si el foco está en otro campo o diálogo, o si el autocompletado está abierto
+  // (ahí Esc lo cierra).
+  const keys = useRef({ working, menu: !!menu, slash: showSlash })
+  keys.current = { working, menu: !!menu, slash: showSlash }
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey || e.repeat) return
+      const k = keys.current
+      if (k.slash || !(k.working || k.menu)) return
+      const t = e.target as HTMLElement | null
+      const inChat = !t || t === document.body || t === ref.current || !!t.closest?.('.conversation-wrap')
+      if (!inChat || document.querySelector('[role="dialog"], .modal, .dialog')) return
+      e.preventDefault()
+      e.stopPropagation()
+      api.input(id, KEYS.esc)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [id])
+
   const send = () => {
     const t = text.trim()
     if (!t || off) return
@@ -253,6 +381,42 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
   return (
     <div className={`composer ${menu ? 'with-menu' : ''}`}>
       {menu && <MenuPanel id={id} menu={menu} />}
+      {showSlash && (
+        <div className="slash-pop" ref={listRef}>
+          {commands === null && <div className="slash-empty">Loading commands…</div>}
+          {commands !== null && matches.length === 0 && <div className="slash-empty">No command or skill matches “/{slashQuery}”.</div>}
+          {matches.map((c, i) => (
+            <button
+              key={c.name}
+              className={`slash-item ${i === pick ? 'on' : ''}`}
+              onMouseEnter={() => setPick(i)}
+              onMouseDown={(e) => {
+                e.preventDefault()
+                accept(c)
+              }}
+            >
+              <span className="slash-name">/{c.name}</span>
+              <span className="slash-desc">{c.description}</span>
+              <span className={`slash-src ${c.source}`}>{SOURCE_LABEL[c.source]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {!menu && cli?.text && (
+        <div className="cli-pending">
+          <span className="cli-pending-label">In the CLI prompt</span>
+          <span className="cli-pending-text" title={cli.text}>
+            {cli.text}
+          </span>
+          <span className="cli-pending-note">Sending from here adds your text after it.</span>
+          <button className="btn-sm ghost" onClick={onOpenCli}>
+            Open CLI
+          </button>
+          <button className="btn-sm" onClick={() => api.input(id, '\r')}>
+            Send it
+          </button>
+        </div>
+      )}
       <textarea
         ref={ref}
         rows={1}
@@ -266,14 +430,36 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
               ? 'Type a number, use the arrows, or write an answer…'
               : working
                 ? 'Claude is working. Your message is queued…'
-                : 'Reply to Claude…'
+                : 'Reply to Claude…  (/ for commands and skills)'
         }
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
+          if (showSlash && matches.length) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              setPick((p) => (p + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length)
+              return
+            }
+            if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey)) {
+              const c = matches[pick]
+              // Si ya está escrito completo, Enter lo envía en vez de volver a completarlo.
+              if (!(e.key === 'Enter' && slashQuery === c.name)) {
+                e.preventDefault()
+                accept(c)
+                return
+              }
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setDismissed(text)
+              return
+            }
+          }
           if (menu && !text) {
             if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.altKey) {
               e.preventDefault()
-              return api.input(id, e.key)
+              if (!e.repeat) chooseOption(id, menu, Number(e.key))
+              return
             }
             const k = MENU_KEYS[e.key]
             if (k && !e.ctrlKey && !e.altKey && !(e.key === 'Enter' && e.shiftKey)) {
@@ -291,10 +477,6 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
             const at = el.selectionStart
             setText(text.slice(0, at) + '\n' + text.slice(el.selectionEnd))
             requestAnimationFrame(() => el.setSelectionRange(at + 1, at + 1))
-          }
-          if (e.key === 'Escape' && working && !text) {
-            e.preventDefault()
-            api.input(id, KEYS.esc)
           }
         }}
       />
@@ -327,6 +509,51 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
   )
 }
 
+// Línea de estado de Claude mientras trabaja ("Harmonizing… (11m 26s · ↓ 57.5k tokens)").
+function useActivity(id: string, working: boolean): Activity | null {
+  const [a, setA] = useState<Activity | null>(null)
+  useEffect(() => {
+    if (!working) return setA(null)
+    let raf = 0
+    const read = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const next = readActivity(id)
+        setA((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      })
+    }
+    read()
+    const off = onScreen(id, read)
+    return () => {
+      off()
+      cancelAnimationFrame(raf)
+    }
+  }, [id, working])
+  return a
+}
+
+// Mensajes encolados (los que mandaste mientras Claude trabajaba), leídos de la pantalla de la CLI.
+function useQueued(id: string): string[] {
+  const [q, setQ] = useState<string[]>([])
+  useEffect(() => {
+    let raf = 0
+    const read = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const next = readQueued(id)
+        setQ((prev) => (prev.join('\u0000') === next.join('\u0000') ? prev : next))
+      })
+    }
+    read()
+    const off = onScreen(id, read)
+    return () => {
+      off()
+      cancelAnimationFrame(raf)
+    }
+  }, [id])
+  return q
+}
+
 export function ConversationView({
   id,
   visible,
@@ -345,11 +572,33 @@ export function ConversationView({
   const scrollRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const chatZoom = useZoom('chat')
+  const queued = useQueued(id)
+  const activity = useActivity(id, status === 'working')
 
+  // Desde qué ítem se anima la aparición: solo lo que llega mientras mirás la conversación. El historial y lo
+  // que llegó estando en otra pestaña se muestra de una (al volver no se re-anima).
+  const streamFrom = useRef(Infinity)
   useEffect(() => {
     if (!active || items !== null) return
-    api.getConversation(id).then(setItems)
+    api.getConversation(id).then((list) => {
+      streamFrom.current = list.length
+      setItems(list)
+    })
   }, [active, id, items])
+  useEffect(() => {
+    if (!visible && items) streamFrom.current = items.length
+  }, [visible, items])
+
+  // Mientras el texto aparece, el alto crece sin que cambien los ítems: se sigue el final si estabas abajo.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !visible) return
+    const mo = new MutationObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight
+    })
+    mo.observe(el, { childList: true, subtree: true, characterData: true })
+    return () => mo.disconnect()
+  }, [visible, items === null])
 
   useEffect(
     () =>
@@ -412,15 +661,34 @@ export function ConversationView({
               <div className="msg-head">
                 You <span className="muted">{time(b.item.at)}</span>
               </div>
-              <div className="msg-text">{b.item.text}</div>
+              <UserText text={b.item.text} />
             </div>
           ) : b.item.kind === 'assistant' ? (
             <div key={b.key} className="msg assistant">
-              <Markdown text={b.item.text} />
+              <Markdown text={b.item.text} stream={b.key >= streamFrom.current} />
+            </div>
+          ) : b.item.kind === 'answers' ? (
+            <div key={b.key} className="msg answers">
+              <div className="msg-head">You answered Claude's questions</div>
+              {(JSON.parse(b.item.text) as { q: string; a: string }[]).map((x, i) => (
+                <div key={i} className="answer">
+                  <div className="answer-q">{x.q}</div>
+                  <div className="answer-a">→ {x.a}</div>
+                </div>
+              ))}
             </div>
           ) : b.item.kind === 'command' ? (
             <div key={b.key} className="msg command">
-              <code>{b.item.text}</code>
+              {b.item.text.includes('\u0000') ? (
+                <details>
+                  <summary>
+                    <code>{b.item.text.split('\u0000')[0]}</code> <span className="muted">· output</span>
+                  </summary>
+                  <pre className="command-out">{b.item.text.split('\u0000')[1]}</pre>
+                </details>
+              ) : (
+                <code>{b.item.text}</code>
+              )}
             </div>
           ) : (
             <div key={b.key} className="msg summary">
@@ -428,7 +696,24 @@ export function ConversationView({
             </div>
           )
         )}
+        {queued.map((q, i) => (
+          <div key={'q' + i} className="msg user queued">
+            <div className="msg-head">
+              You <span className="queued-badge">Queued</span>
+              <span className="muted"> · Claude reads it when it finishes the current step</span>
+            </div>
+            <UserText text={q} />
+          </div>
+        ))}
       </div>
+      {activity && (
+        <div className="activity">
+          <span className="activity-dot" />
+          <span className="activity-label">{activity.label}</span>
+          {activity.detail && <span className="activity-detail">{activity.detail}</span>}
+          {activity.tip && <span className="activity-tip">{activity.tip}</span>}
+        </div>
+      )}
       <Composer id={id} status={status} onOpenCli={onReply} />
     </div>
   )

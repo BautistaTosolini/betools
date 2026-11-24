@@ -1,5 +1,5 @@
 import { clipboard, contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
-import type { Artifact, ConversationItem, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
+import type { Artifact, ConversationItem, SlashCommand, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
 
 function on<T extends unknown[]>(channel: string, cb: (...args: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, ...args: unknown[]) => cb(...(args as T))
@@ -77,6 +77,14 @@ const api = {
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke('shell:openExternal', url),
   pendingRestarts: (): Promise<string[]> => ipcRenderer.invoke('sessions:pendingRestart'),
   onPendingRestart: (cb: (id: string, on: boolean) => void) => on('session:pendingRestart', cb),
+
+  listSlashCommands: (sessionId: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', sessionId),
+
+  // Visor de Markdown dentro de betools.
+  readDoc: (path: string): Promise<{ text: string; mtime: number }> => ipcRenderer.invoke('doc:read', path),
+  watchDoc: (path: string): Promise<void> => ipcRenderer.invoke('doc:watch', path),
+  unwatchDoc: (path: string): Promise<void> => ipcRenderer.invoke('doc:unwatch', path),
+  onDocChanged: (cb: (path: string, doc: { text: string; mtime: number } | null) => void) => on('doc:changed', cb),
 
   // Zoom de toda la ventana (el del chat se hace en el renderer).
   setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),

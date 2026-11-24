@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, unwatchFile, watchFile } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { PtyManager } from './pty-manager'
 import { SHELL_PREFIX, ShellManager } from './shell-manager'
 import { SessionStore } from './session-store'
@@ -14,6 +14,8 @@ import { discoverSessions } from './discover'
 import { migrateLegacyData } from './migrate'
 import { TabTitles } from './titles'
 import { DailyTokenCounter, StatusLineWatcher } from './usage'
+import { INTERRUPTED } from './transcript-parser'
+import { listSlashCommandsFull } from './slash-commands'
 import { awsProfiles, LocalSecrets, resolveEnv, resolveRef, validateName } from './secrets'
 import type { EnvScope, EnvSource, Folder, FolderSuggestion, SavedCommand, Session, SessionMeta, SessionStatus, Settings } from '../shared/types'
 
@@ -96,6 +98,41 @@ function envChanged(scope: EnvScope): void {
       }, 1500)
     )
   }
+}
+
+// Visor de documentos: solo Markdown, hasta 5 MB. Cada documento abierto se vigila (polling) y se
+// reenvía al renderer cuando cambia, por ejemplo si Claude lo edita.
+const DOC_EXTS = new Set(['.md', '.markdown', '.mdx'])
+const DOC_MAX = 5 * 1024 * 1024
+const docWatch = new Map<string, number>()
+
+function readDoc(path: string): { text: string; mtime: number } {
+  if (!DOC_EXTS.has(extname(path).toLowerCase())) throw new Error('Only Markdown files can be opened in betools.')
+  const st = statSync(path)
+  if (!st.isFile()) throw new Error(`Not a file: ${path}`)
+  if (st.size > DOC_MAX) throw new Error('The file is too large to preview (over 5 MB).')
+  return { text: readFileSync(path, 'utf8'), mtime: st.mtimeMs }
+}
+
+function watchDoc(path: string): void {
+  const n = docWatch.get(path) ?? 0
+  docWatch.set(path, n + 1)
+  if (n > 0) return
+  watchFile(path, { interval: 1000 }, (cur, prev) => {
+    if (cur.mtimeMs === prev.mtimeMs && cur.size === prev.size) return
+    try {
+      send('doc:changed', path, readDoc(path))
+    } catch {
+      send('doc:changed', path, null) // se borró o se volvió ilegible
+    }
+  })
+}
+
+function unwatchDoc(path: string): void {
+  const n = (docWatch.get(path) ?? 0) - 1
+  if (n > 0) return void docWatch.set(path, n)
+  docWatch.delete(path)
+  unwatchFile(path)
 }
 
 function metaOf(id: string): SessionMeta {
@@ -475,6 +512,14 @@ function registerIpc(): void {
   ipcMain.handle('settings:get', () => settings.get())
   ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settings.update(patch))
 
+  ipcMain.handle('slash:list', (_e, sessionId: string) => {
+    const session = store.find(sessionId)
+    return session ? listSlashCommandsFull(session.cwd) : []
+  })
+  ipcMain.handle('doc:read', (_e, path: string) => readDoc(path))
+  ipcMain.handle('doc:watch', (_e, path: string) => watchDoc(path))
+  ipcMain.handle('doc:unwatch', (_e, path: string) => unwatchDoc(path))
+
   ipcMain.handle('artifacts:list', (_e, id: string) => watcher.list(id))
   ipcMain.handle('artifacts:open', (_e, path: string) => openArtifact(path))
   ipcMain.handle('artifacts:reveal', (_e, path: string) => revealArtifact(path))
@@ -554,7 +599,10 @@ app.whenReady().then(() => {
       status.exited(id)
       send('pty:exit', id, code)
     },
-    resolveEnv: (session) => resolveEnv(envLayers(session), secrets)
+    resolveEnv: (session) => resolveEnv(envLayers(session), secrets),
+    // Nombre en claude.ai/el teléfono: el título de betools (ticket + resumen). Sin título, Claude lo nombra
+    // con la conversación.
+    remoteControlName: (session) => (settings.get().remoteControl ? displayTitle(session.id) ?? '' : null)
   })
   shells = new ShellManager({
     onData: (key, data) => send('pty:data', key, data),
@@ -570,7 +618,12 @@ app.whenReady().then(() => {
     (id, artifacts) => send('artifacts:changed', id, artifacts),
     (id) => emitTitle(id),
     (id) => send('session:meta', id, metaOf(id)),
-    (id, start, items) => send('conversation:changed', id, start, items)
+    (id, start, items) => {
+      send('conversation:changed', id, start, items)
+      // Solo interrupciones recientes: al cargar el transcript entero aparecen también las viejas.
+      if (start > 0 && items.some((it) => it.kind === 'summary' && it.text === INTERRUPTED && Date.now() - Date.parse(it.at ?? '') < 60_000))
+        status.interrupted(id)
+    }
   )
   daily = new DailyTokenCounter((t) => send('usage:daily', t))
   titles = new TabTitles((id) => emitTitle(id))
@@ -581,7 +634,7 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
-  daily.start()
+  daily.start(10_000)
   createTray()
 
   // Opcional: levantar todas las sesiones al iniciar (por defecto se levantan al seleccionarlas).

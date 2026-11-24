@@ -6,6 +6,8 @@ import { homedir } from 'node:os'
 import { basename, extname, isAbsolute, resolve } from 'node:path'
 import type { Artifact, ArtifactSource, ConversationItem } from '../shared/types'
 
+export const INTERRUPTED = 'Interrupted by user'
+
 // Extensiones que se consideran "documento" (filtro por defecto del panel).
 export const DOCUMENT_EXTS = new Set([
   '.pdf', '.html', '.htm', '.md', '.markdown', '.txt', '.csv', '.tsv',
@@ -157,6 +159,34 @@ export class TranscriptParser {
   private conversation(d: any): void {
     const at: string = d.timestamp ?? new Date().toISOString()
     const content = d.message?.content
+    // Comandos locales (/context, /model…) y su salida: type "system", subtype "local_command".
+    if (d.type === 'system' && d.subtype === 'local_command' && typeof d.content === 'string') {
+      const t = d.content
+      const cmd = /<command-name>([^<]*)<\/command-name>/.exec(t)
+      if (cmd) {
+        const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(t)?.[1]?.trim()
+        return this.push_({ kind: 'command', text: `${cmd[1]}${args ? ' ' + args : ''}`, at })
+      }
+      const out = /<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>/.exec(t)?.[1]
+      const clean = out?.replace(/\x1b\[[0-9;]*m/g, '').trim()
+      const last = this.items[this.items.length - 1]
+      // La salida se pega al comando anterior (separada por \u0000) para mostrarla desplegable.
+      if (clean && last?.kind === 'command' && !last.text.includes('\u0000')) {
+        this.items[this.items.length - 1] = { ...last, text: `${last.text}\u0000${clean}` }
+      }
+      return
+    }
+    // Mensaje que mandaste mientras Claude trabajaba y que tomó a mitad del turno.
+    const att = d.type === 'attachment' ? d.attachment : null
+    if (att?.type === 'queued_command' && typeof att.prompt === 'string' && (att.origin?.kind === 'human' || att.humanTurn)) {
+      return this.push_({ kind: 'user', text: att.prompt.trim(), at })
+    }
+    // Respuestas a AskUserQuestion (vienen con estructura en toolUseResult.answers).
+    const answers = d.type === 'user' ? d.toolUseResult?.answers : null
+    if (answers && typeof answers === 'object' && !Array.isArray(answers)) {
+      const list = Object.entries(answers).map(([q, a]) => ({ q, a: String(a) }))
+      if (list.length) this.push_({ kind: 'answers', text: JSON.stringify(list), at })
+    }
     if (d.type === 'user') {
       if (d.isCompactSummary) return this.push_({ kind: 'summary', text: 'Conversation compacted', at })
       if (d.isMeta) return
@@ -182,6 +212,11 @@ export class TranscriptParser {
         }
         // Salidas de comandos locales, avisos internos y recordatorios del sistema: no son mensajes tuyos.
         if (/^<(local-command|bash-std|system-reminder|task-notification|command-)/.test(t)) continue
+        // Interrupción con Esc/Ctrl+C: va como separador, no como mensaje tuyo.
+        if (/^\[Request interrupted by user/.test(t)) {
+          this.push_({ kind: 'summary', text: INTERRUPTED, at })
+          continue
+        }
         this.push_({ kind: 'user', text: t, at })
       }
       return

@@ -118,6 +118,12 @@ export class StatusTracker {
     if (this.get(id) === 'done') this.set(id, 'idle')
   }
 
+  // Interrupción (Esc o Ctrl+C): el hook Stop no corre en ese caso, se detecta por el transcript.
+  interrupted(id: string): void {
+    const cur = this.get(id)
+    if (cur === 'working' || cur === 'waiting') this.set(id, 'idle')
+  }
+
   private stop(id: string): void {
     const t = this.tracked.get(id)
     if (!t) return

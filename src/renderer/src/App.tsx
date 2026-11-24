@@ -11,7 +11,11 @@ import { Rail } from './components/Rail'
 import { UsageBar } from './components/UsageBar'
 import { ConversationView } from './components/ConversationView'
 import { ZoomControl } from './components/ZoomControl'
+import { DocView } from './components/DocView'
+import logo from './assets/logo.svg'
 import { stepZoom, zoomKeyDir } from './zoom'
+import { getDraft, setDraft } from './drafts'
+import { readCliInput } from './term-registry'
 import { EnvDialog } from './components/EnvDialog'
 import { CommandsDialog } from './components/CommandsDialog'
 import type { EnvScope } from '../../shared/types'
@@ -53,8 +57,19 @@ function saveWidth(key: string, v: number): void {
     // sin storage: no pasa nada
   }
 }
-type Tab = 'rendered' | 'shell' | 'claude'
-const TAB_ORDER: Tab[] = ['rendered', 'shell', 'claude']
+// Pestañas fijas + documentos abiertos ("doc:<ruta>").
+type BaseTab = 'rendered' | 'shell' | 'claude'
+type Tab = BaseTab | `doc:${string}`
+const TAB_ORDER: BaseTab[] = ['rendered', 'shell', 'claude']
+const docName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
+function loadDocs(): Record<string, string[]> {
+  try {
+    const v = JSON.parse(localStorage.getItem('docTabs') ?? '{}')
+    return v && typeof v === 'object' ? v : {}
+  } catch {
+    return {}
+  }
+}
 const clamp = (v: number) => Math.min(600, Math.max(160, v))
 const RAIL_W = 44
 
@@ -72,10 +87,60 @@ export function App() {
   // Pestaña por defecto: Rendered. Orden: Rendered → Terminal → CLI.
   const [tabs, setTabs] = useState<Record<string, Tab>>({})
   const [pending, setPending] = useState<Set<string>>(new Set())
+  // Documentos abiertos por sesión (se recuerdan por equipo).
+  const [docs, setDocsRaw] = useState<Record<string, string[]>>(loadDocs)
+  const setDocs = (fn: (d: Record<string, string[]>) => Record<string, string[]>) =>
+    setDocsRaw((prev) => {
+      const next = fn(prev)
+      try {
+        localStorage.setItem('docTabs', JSON.stringify(next))
+      } catch {
+        // sin storage: las pestañas duran hasta cerrar la app
+      }
+      return next
+    })
+  const openDoc = (id: string, path: string) => {
+    setDocs((d) => ((d[id] ?? []).includes(path) ? d : { ...d, [id]: [...(d[id] ?? []), path] }))
+    setTabs((t) => ({ ...t, [id]: `doc:${path}` }))
+  }
+  const closeDoc = (id: string, path: string) => {
+    const list = docs[id] ?? []
+    const i = list.indexOf(path)
+    const rest = list.filter((p) => p !== path)
+    setDocs((d) => ({ ...d, [id]: (d[id] ?? []).filter((p) => p !== path) }))
+    // Si era la pestaña activa, se pasa al documento vecino o a Rendered.
+    setTabs((t) =>
+      t[id] === `doc:${path}` ? { ...t, [id]: rest.length ? (`doc:${rest[Math.min(i, rest.length - 1)]}` as Tab) : 'rendered' } : t
+    )
+  }
   const [shellOpen, setShellOpen] = useState<Set<string>>(new Set())
   const [commandsFor, setCommandsFor] = useState<Folder | null>(null)
   const tabOf = (id: string): Tab => tabs[id] ?? 'rendered'
+  // El borrador tiene un solo dueño para no enviarse dos veces: al ir a la CLI, lo que escribiste en Rendered
+  // pasa al prompt de Claude (sin Enter); al volver, lo que quedó en el prompt vuelve a Rendered.
+  const moveDraft = (id: string, from: Tab, to: Tab) => {
+    if (from === to) return
+    if (to === 'claude') {
+      const draft = getDraft(id).replace(/\s+$/, '')
+      if (!draft) return
+      api.input(id, draft.includes('\n') ? `\x1b[200~${draft}\x1b[201~` : draft)
+      setDraft(id, '')
+    } else if (from === 'claude') {
+      const cli = readCliInput(id)
+      if (!cli?.text || cli.collapsed) return
+      const prev = getDraft(id)
+      setDraft(id, prev ? `${prev}\n${cli.text}` : cli.text)
+      // Ctrl+U borra hasta el inicio de la línea; dos por línea cubren también los saltos.
+      api.input(id, '\x15'.repeat(cli.lines * 2 + 2))
+      // Si no se pudo vaciar (p. ej. el cursor no estaba al final), se deja el texto en la CLI.
+      setTimeout(() => {
+        const after = readCliInput(id)
+        if (after?.text) setDraft(id, prev)
+      }, 400)
+    }
+  }
   const showTab = (id: string, tab: Tab) => {
+    moveDraft(id, tabOf(id), tab)
     setTabs((t) => ({ ...t, [id]: tab }))
     if (tab === 'shell') setShellOpen((s) => (s.has(id) ? s : new Set(s).add(id)))
   }
@@ -168,10 +233,18 @@ export function App() {
         return
       }
       if (!e.ctrlKey || e.altKey) return
+      // Ctrl+W cierra el documento activo (en las terminales, Ctrl+W sigue llegando a Claude/la shell).
+      const cur = selectedId ? tabOf(selectedId) : null
+      if (cur?.startsWith('doc:') && !e.shiftKey && e.key.toLowerCase() === 'w') {
+        e.preventDefault()
+        e.stopPropagation()
+        closeDoc(selectedId!, cur.slice(4))
+        return
+      }
       if (e.key === '`' && selectedId) {
         e.preventDefault()
         e.stopPropagation()
-        const i = TAB_ORDER.indexOf(tabOf(selectedId))
+        const i = TAB_ORDER.indexOf(tabOf(selectedId) as BaseTab)
         showTab(selectedId, TAB_ORDER[(i + (e.shiftKey ? TAB_ORDER.length - 1 : 1)) % TAB_ORDER.length])
         return
       }
@@ -197,7 +270,7 @@ export function App() {
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [ordered, sessions, folders, selectedId, select, tabs])
+  }, [ordered, sessions, folders, selectedId, select, tabs, docs])
 
   // Ctrl+rueda: sobre la columna central, zoom del chat; en el resto, de toda la ventana.
   useEffect(() => {
@@ -262,7 +335,7 @@ export function App() {
     <div className="app">
       <header className="page-header">
         <div className="brand">
-          <span className="brand-mark" />
+          <img className="brand-mark" src={logo} alt="" />
           <h1>betools</h1>
         </div>
         {workingCount > 0 && <span className="pill working">{workingCount} working</span>}
@@ -347,11 +420,11 @@ export function App() {
               <span className="grip">⠿</span>
               <div className="center-title">
                 <div className="center-line">
-                  {selTitle.ticket && (
-                    <span className="ticket">
-                      {selTitle.ticket}
+                  {selTitle.tickets.map((k) => (
+                    <span key={k} className="ticket">
+                      {k}
                     </span>
-                  )}
+                  ))}
                   <h2 className="center-summary">{selTitle.summary ?? selected.name}</h2>
                 </div>
                 <div className="center-meta">
@@ -370,7 +443,7 @@ export function App() {
                     label: 'Environment variables…',
                     onClick: () =>
                       setEnvFor({
-                        title: `Variables for ${selTitle.ticket ?? selTitle.summary ?? selected.name}`,
+                        title: `Variables for ${selTitle.tickets.join(' ') || selTitle.summary || selected.name}`,
                         scope: { kind: 'session', id: selected.id },
                         sessionId: selected.id
                       })
@@ -402,6 +475,31 @@ export function App() {
                   {t === 'rendered' ? 'Rendered' : t === 'shell' ? 'Terminal' : 'CLI'}
                 </button>
               ))}
+              {(docs[selected.id] ?? []).length > 0 && <span className="tab-sep" />}
+              <div className="doc-tabs">
+                {(docs[selected.id] ?? []).map((p) => (
+                  <div
+                    key={p}
+                    className={`tab doc-tab ${tabOf(selected.id) === `doc:${p}` ? 'on' : ''}`}
+                    title={`${p}\nMiddle-click or Ctrl+W to close`}
+                    onClick={() => showTab(selected.id, `doc:${p}`)}
+                    onAuxClick={(e) => e.button === 1 && closeDoc(selected.id, p)}
+                  >
+                    <span className="doc-icon">MD</span>
+                    <span className="doc-tab-name">{docName(p)}</span>
+                    <button
+                      className="doc-close"
+                      title="Close (Ctrl+W)"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        closeDoc(selected.id, p)
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
               <span style={{ flex: 1 }} />
               {selFolder && (
                 <Kebab
@@ -426,6 +524,16 @@ export function App() {
               .filter((s) => shellOpen.has(s.id))
               .map((s) => (
                 <TerminalView key={'shell:' + s.id} id={'shell:' + s.id} visible={s.id === selectedId && tabOf(s.id) === 'shell'} />
+              ))}
+            {selected &&
+              (docs[selected.id] ?? []).map((p) => (
+                <DocView
+                  key={selected.id + p}
+                  path={p}
+                  cwd={selected.cwd}
+                  visible={tabOf(selected.id) === `doc:${p}`}
+                  onOpenDoc={(np) => openDoc(selected.id, np)}
+                />
               ))}
             {selected && (
               <ConversationView
@@ -461,7 +569,11 @@ export function App() {
           <div />
         )}
         {rightOpen ? (
-          <ArtifactsPanel session={selected} onCollapse={() => setRightOpen(false)} />
+          <ArtifactsPanel
+            session={selected}
+            onCollapse={() => setRightOpen(false)}
+            onOpenDoc={(p) => selected && openDoc(selected.id, p)}
+          />
         ) : (
           <Rail side="right" label="Artifacts" onOpen={() => setRightOpen(true)} />
         )}

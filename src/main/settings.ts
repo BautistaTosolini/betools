@@ -4,7 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { Settings } from '../shared/types'
 
-const DEFAULTS: Settings = { closeToTray: true, autostart: false, notifications: true, eagerStart: false }
+const DEFAULTS: Settings = { closeToTray: true, autostart: false, notifications: true, eagerStart: false, remoteControl: true }
 const AUTOSTART_FILE = join(homedir(), '.config', 'autostart', 'betools.desktop')
 // Entrada de autoarranque del nombre anterior de la app.
 const LEGACY_AUTOSTART = join(homedir(), '.config', 'autostart', 'clawhip.desktop')

@@ -38,6 +38,8 @@ const envLayers = (session: Session) => [{ scope: { kind: 'session', id: session
 
 const status = new StatusTracker(join(DATA, 'status'), (id, next) => broadcast('session:status', id, next))
 const ptys = new PtyManager({
+  // La versión web no activa Remote Control (por ahora solo la app de escritorio).
+  remoteControlName: () => null,
   onSpawn: (id) => status.start(id),
   onData: (id, data) => broadcast('pty:data', id, data),
   onExit: (id, code) => {

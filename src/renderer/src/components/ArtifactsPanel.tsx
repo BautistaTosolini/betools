@@ -6,6 +6,8 @@ const api = window.clawhip
 interface Props {
   session: Session | undefined
   onCollapse(): void
+  // Abre un .md como pestaña en la columna central.
+  onOpenDoc(path: string): void
 }
 
 const rtf = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' })
@@ -35,7 +37,7 @@ const BADGE_COLORS: Record<string, string> = {
   pptx: '#d97757', csv: '#4fbf7f', png: '#c678dd', jpg: '#c678dd', jpeg: '#c678dd', svg: '#c678dd'
 }
 
-export function ArtifactsPanel({ session, onCollapse }: Props) {
+export function ArtifactsPanel({ session, onCollapse, onOpenDoc }: Props) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [onlyDocs, setOnlyDocs] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -68,6 +70,8 @@ export function ArtifactsPanel({ session, onCollapse }: Props) {
 
   const open = async (a: Artifact) => {
     setError(null)
+    // Markdown: se abre como pestaña dentro de betools; el resto, con la app del sistema.
+    if (/\.(md|markdown|mdx)$/i.test(a.path)) return onOpenDoc(a.path)
     try {
       await api.openArtifact(a.path)
     } catch (e) {

@@ -27,13 +27,13 @@ export function Rail({ side, label, onOpen, sessions = [], folders = [], selecte
         {sessions.map((s) => {
           const color = folderFor(s, folders)?.color ?? NO_FOLDER_COLOR
           const st = status[s.id] ?? 'stopped'
-          const { ticket, summary } = sessionLabel(titles[s.id], s.name)
+          const { tickets, summary } = sessionLabel(titles[s.id], s.name)
           return (
             <button
               key={s.id}
               className={`rail-session ${s.id === selectedId ? 'selected' : ''}`}
               style={{ ['--fc' as string]: color }}
-              title={[ticket, summary ?? s.name].filter(Boolean).join(' — ')}
+              title={[tickets.join(' '), summary ?? s.name].filter(Boolean).join(' — ')}
               onClick={() => onSelect?.(s.id)}
             >
               <span className={`dot ${st}`}>{st === 'waiting' ? '!' : ''}</span>

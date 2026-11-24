@@ -140,7 +140,7 @@ export function Sidebar(props: Props) {
                 <ul className="session-list">
                   {sessions.map((s) => {
                     const st = status[s.id] ?? 'stopped'
-                    const { ticket, summary, fallback } = sessionLabel(titles[s.id], s.name)
+                    const { ticket, tickets, summary, fallback } = sessionLabel(titles[s.id], s.name)
                     const sub = relCwd(s, folder)
                     const n = shortcutOf(s.id)
                     return (
@@ -158,7 +158,11 @@ export function Sidebar(props: Props) {
                         <div className="session-body">
                           {(ticket || st === 'working' || st === 'waiting' || st === 'done') && (
                             <div className="session-top">
-                              {ticket && <span className="ticket">{ticket}</span>}
+                              {tickets.map((k) => (
+                                <span key={k} className="ticket">
+                                  {k}
+                                </span>
+                              ))}
                               {(st === 'working' || st === 'waiting' || st === 'done') && (
                                 <span className={`status ${st}`}>{STATUS_LABEL[st]}</span>
                               )}
@@ -168,7 +172,7 @@ export function Sidebar(props: Props) {
                           <input
                             autoFocus
                             value={draft}
-                            placeholder="VE-123 task summary"
+                            placeholder="VE-123 task summary  ·  VE-123 VE-130 summary"
                             onChange={(e) => setDraft(e.target.value)}
                             onBlur={() => commit(s.id)}
                             onKeyDown={(e) => {

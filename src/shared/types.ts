@@ -72,6 +72,8 @@ export interface Settings {
   autostart: boolean
   notifications: boolean
   eagerStart: boolean
+  // Lanzar cada sesión (nueva o retomada) con --remote-control para manejarla desde claude.ai / el teléfono.
+  remoteControl: boolean
 }
 
 export interface DiscoveredSession {
@@ -131,9 +133,17 @@ export interface DailyTokens {
 // user: prompt tuyo · assistant: texto de Claude (Markdown) · tool: herramienta que usó (resumen de una línea)
 // command: slash command o "!" · summary: marca de compactación
 export interface ConversationItem {
-  kind: 'user' | 'assistant' | 'tool' | 'command' | 'summary'
+  // answers: respuestas a AskUserQuestion (text = JSON [{q, a}])
+  kind: 'user' | 'assistant' | 'tool' | 'command' | 'summary' | 'answers'
   text: string
   at: string
   // Respuesta a la que pertenece (los bloques de texto de una misma respuesta se juntan).
   msgId?: string
+}
+
+// Comando o skill para el autocompletado de "/" en Rendered.
+export interface SlashCommand {
+  name: string
+  description: string
+  source: 'builtin' | 'user' | 'project' | 'plugin'
 }

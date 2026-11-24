@@ -46,8 +46,8 @@ export function NewSessionDialog({ folder, onCreate, onCancel }: Props) {
           )}
         </h2>
         <label>
-          Ticket and summary <span className="muted small">(optional; otherwise Claude sets it when it picks up the ticket)</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="VE-123 rotate certificates" autoFocus />
+          Tickets and summary <span className="muted small">(optional; main ticket first, keys separated by spaces)</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="VE-123 rotate certs  ·  two tickets: VE-123 VE-130 rotate certs" autoFocus />
         </label>
         <label>
           Working directory

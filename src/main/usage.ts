@@ -1,7 +1,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, statSync, unwatchFile, watchFile, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import type { DailyTokens, PlanLimits, SessionMeta } from '../shared/types'
+import type { DailyTokens, PlanLimits, PlanWindow, SessionMeta } from '../shared/types'
 
 // Datos que Claude Code le pasa al comando de status line (JSON por stdin). Las sesiones que lanza
 // betools usan un status line propio (ver status-tracker) que guarda ese JSON en <statusFile>.line.
@@ -18,6 +18,24 @@ interface LineJson {
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+// Margen para considerar que dos resets_at son la misma ventana (pueden variar unos segundos entre lecturas).
+const SAME_WINDOW_S = 300
+
+// Combina la lectura guardada con una nueva de la misma ventana (5 h o semanal):
+// - ventana nueva (reinicio posterior): se toma la nueva, aunque sea menor;
+// - lectura de una ventana anterior (otra sesión con datos viejos): se ignora;
+// - misma ventana: se queda el mayor porcentaje.
+export function mergeWindow(cur: PlanWindow | null, next: PlanWindow | null, nowSec: number): PlanWindow | null {
+  if (!next) return cur
+  if (!cur) return next
+  if (next.resetsAt !== null && next.resetsAt < nowSec) return cur
+  if (cur.resetsAt !== null && cur.resetsAt < nowSec) return next
+  if (cur.resetsAt === null || next.resetsAt === null) return next.pct >= cur.pct ? next : cur
+  if (next.resetsAt > cur.resetsAt + SAME_WINDOW_S) return next
+  if (next.resetsAt < cur.resetsAt - SAME_WINDOW_S) return cur
+  return next.pct >= cur.pct ? next : cur
+}
 
 export class StatusLineWatcher {
   private readonly files = new Map<string, string>()
@@ -86,7 +104,14 @@ export class StatusLineWatcher {
     if (!rl || (!rl.five_hour && !rl.seven_day)) return
     const win = (w?: { used_percentage?: number; resets_at?: number }) =>
       w && num(w.used_percentage) !== null ? { pct: w.used_percentage as number, resetsAt: num(w.resets_at) } : null
-    const next: PlanLimits = { fiveHour: win(rl.five_hour), sevenDay: win(rl.seven_day), updatedAt: Date.now() }
+    // Cada sesión guarda la lectura de SU última respuesta y el status line se repite cada 30 s, así que una
+    // sesión quieta vuelve a mandar un valor viejo. Se combina por ventana: el consumo solo sube hasta el reinicio.
+    const now = Date.now() / 1000
+    const next: PlanLimits = {
+      fiveHour: mergeWindow(this.limits?.fiveHour ?? null, win(rl.five_hour), now),
+      sevenDay: mergeWindow(this.limits?.sevenDay ?? null, win(rl.seven_day), now),
+      updatedAt: Date.now()
+    }
     if (JSON.stringify({ ...next, updatedAt: 0 }) === JSON.stringify({ ...this.limits, updatedAt: 0 })) return
     this.limits = next
     try {
