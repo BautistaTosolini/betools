@@ -10,10 +10,34 @@ export interface MenuOption {
   checked: boolean | null // multiselección: [x] / [ ]
 }
 
+// Formulario de un servidor MCP (elicitation): campos que se recorren con ↑/↓ y botones Accept/Decline.
+export interface FormChoice {
+  label: string
+  cursor: boolean
+  on: boolean
+}
+
+export interface FormField {
+  label: string
+  value: string // '' si no tiene valor
+  status: 'required' | 'done' | 'error' | ''
+  focused: boolean
+  expanded: boolean
+  kind: 'choice' | 'bool' | 'text' | 'unknown' // solo se sabe con certeza en el campo enfocado
+  desc: string[]
+  choices: FormChoice[]
+}
+
+export interface Form {
+  fields: FormField[]
+  button: 'accept' | 'decline' | null // botón enfocado; null si el foco está en un campo
+}
+
 export interface Menu {
   header: string[]
   options: MenuOption[]
   hint: string
+  form?: Form
 }
 
 const RULE = /^\s*[─━═]{8,}/
@@ -21,6 +45,66 @@ const HINT = /(Enter to (select|confirm|submit|continue)|Esc to (cancel|exit|go 
 const OPTION = /^(\s*)(?:([❯›>])\s*)?(?:\[([ x✓✔])\]\s*)?(\d{1,2})[.)]\s+(.*\S)\s*$/
 // Fin del diálogo hacia arriba: tu prompt, una respuesta o herramienta de Claude, o la marca de "terminó".
 const ABOVE = /^(❯\s(?!\s*\d{1,2}[.)]\s)|[●⏺✻✶✳✢·]\s)/
+
+const BUTTONS = /^(\s*)(❯\s+)?Accept\s+(❯\s+)?Decline\s*$/
+// Campo, relativo a la sangría del diálogo: "❯ * Decision: ▸ not set" (cursor, estado, título, valor).
+const FIELD = /^([❯ ]) ([*✔✓⚠ ]) (\S.*?):(?: (.*))?$/
+const CHOICE = /^\s*([❯ ]) ([◯◉☐☒]) (.*)$/
+const EMPTY = /^(not set|Type something…)$/
+
+// Formato de la TUI (Claude Code 2.1.x):
+//   ❯ * Decision: ▾                       ← campo enfocado y desplegado
+//         ❯ ◯ Approve                     ← opciones (◯/◉ única, ☐/☒ múltiple)
+//         Approve or reject this…         ← descripción
+//     ✔ Confirm: ☒
+//     Accept    Decline                   ← "❯ Accept" cuando el foco está en los botones
+function parseForm(region: string[]): { header: string[]; form: Form } | null {
+  const bi = region.findIndex((l) => BUTTONS.test(l))
+  if (bi < 0) return null
+  const bm = BUTTONS.exec(region[bi])!
+  const ind = bm[2] ? bm[1].length : Math.max(0, bm[1].length - 2)
+  const isField = (l: string) => !l.slice(0, ind).trim() && FIELD.test(l.slice(ind))
+  let first = region.findIndex((l, i) => i < bi && isField(l))
+  if (first < 0) first = bi
+  let header = region.slice(0, first)
+  const rule = header.map((l) => RULE.test(l)).lastIndexOf(true)
+  header = header.slice(rule + 1)
+
+  const fields: FormField[] = []
+  for (const line of region.slice(first, bi)) {
+    if (!line.trim()) continue
+    const c = CHOICE.exec(line)
+    const cur = fields[fields.length - 1]
+    if (c && cur) {
+      cur.choices.push({ label: c[3].trim(), cursor: c[1] === '❯', on: c[2] === '◉' || c[2] === '☒' })
+      continue
+    }
+    if (isField(line)) {
+      const m = FIELD.exec(line.slice(ind))!
+      const raw = (m[4] ?? '').trim()
+      const focused = m[1] === '❯'
+      const arrow = /^[▸▾]/.test(raw)
+      const value = raw.replace(/^[▸▾]\s*/, '')
+      fields.push({
+        label: m[3],
+        value: EMPTY.test(value) ? '' : value,
+        status: m[2] === '*' ? 'required' : m[2] === '⚠' ? 'error' : m[2] === ' ' ? '' : 'done',
+        focused,
+        expanded: raw.startsWith('▾'),
+        kind: arrow ? 'choice' : /^[☐☒]$/.test(value) ? 'bool' : focused ? 'text' : 'unknown',
+        desc: [],
+        choices: []
+      })
+      continue
+    }
+    // Indicadores de desplazamiento ("↑ 3 more") y descripciones.
+    if (cur && !/^\s*[↑↓]\s/.test(line)) cur.desc.push(line.trim())
+  }
+  if (!fields.length) return null
+  const button = bm[2] ? 'accept' : bm[3] ? 'decline' : null
+  const pad = Math.min(...header.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length), 99)
+  return { header: header.map((l) => l.slice(pad === 99 ? 0 : pad).trimEnd()), form: { fields, button } }
+}
 
 export function parseMenu(lines: string[]): Menu | null {
   let end = lines.length - 1
@@ -48,6 +132,8 @@ export function parseMenu(lines: string[]): Menu | null {
   let start = hintIdx - 1
   while (start >= 0 && !ABOVE.test(lines[start])) start--
   const region = lines.slice(start + 1, hintIdx)
+  const f = parseForm(region)
+  if (f) return { header: f.header, options: [], hint, form: f.form }
 
   const header: string[] = []
   const options: MenuOption[] = []

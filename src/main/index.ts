@@ -512,9 +512,9 @@ function registerIpc(): void {
   ipcMain.handle('settings:get', () => settings.get())
   ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settings.update(patch))
 
-  ipcMain.handle('slash:list', (_e, sessionId: string) => {
+  ipcMain.handle('slash:list', (_e, sessionId: string, quick?: boolean) => {
     const session = store.find(sessionId)
-    return session ? listSlashCommandsFull(session.cwd) : []
+    return session ? listSlashCommandsFull(session.cwd, !!quick) : []
   })
   ipcMain.handle('doc:read', (_e, path: string) => readDoc(path))
   ipcMain.handle('doc:watch', (_e, path: string) => watchDoc(path))

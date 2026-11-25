@@ -17,37 +17,69 @@ import { cleanEnv } from './pty-manager'
 // - skills y comandos de los plugins habilitados (installed_plugins.json + enabledPlugins)
 // Referencias: https://code.claude.com/docs/en/slash-commands · https://code.claude.com/docs/en/skills
 
+// Comandos propios de Claude Code que se usan en la TUI. Sacados de las definiciones del binario 2.1.332
+// (sin los ocultos ni los que dependen de una función experimental); los que solo existen en modo interactivo
+// (resume, theme, login…) no vienen en el "init", así que esta lista es la única fuente para ellos.
 const BUILTIN: [string, string][] = [
   ['add-dir', 'Add a working directory'],
+  ['advisor', 'Let Claude consult a stronger model at key moments'],
   ['agents', 'Manage subagents'],
-  ['clear', 'Clear the conversation history'],
-  ['compact', 'Compact the conversation, with optional focus instructions'],
+  ['artifacts', 'Browse your published and shared artifacts'],
+  ['autocompact', 'Set how full the context gets before auto-summarizing'],
+  ['background', 'Send this session to the background and free the terminal'],
+  ['branch', 'Create a branch of the current conversation at this point'],
+  ['btw', 'Ask a side question without interrupting Claude'],
+  ['cd', 'Move this session to a new working directory'],
+  ['clear', 'Start a new session with empty context'],
+  ['color', 'Set the prompt bar color for this session'],
+  ['compact', 'Free up context by summarizing the conversation so far'],
   ['config', 'Open settings'],
-  ['context', 'Show context window usage'],
-  ['cost', 'Show token usage and cost of the session'],
-  ['doctor', 'Check the Claude Code installation'],
-  ['effort', 'Set the reasoning effort'],
+  ['context', 'Show current context usage'],
+  ['copy', 'Copy the last response to clipboard (/copy 2 for the one before)'],
+  ['diff', 'Show the changes made in this session'],
+  ['effort', "Set the model's effort level"],
   ['exit', 'Exit Claude Code'],
-  ['export', 'Export the conversation'],
+  ['export', 'Export this session to a file or clipboard'],
   ['fast', 'Toggle fast mode'],
-  ['help', 'Show help'],
-  ['hooks', 'Manage hooks'],
+  ['feedback', 'Send feedback to Anthropic or report a bug'],
+  ['focus', 'Toggle focus view: just your prompt, summary, and response'],
+  ['fork', 'Start a background agent with the full conversation'],
+  ['goal', 'Set a goal Claude checks before stopping'],
+  ['help', 'Show help and available commands'],
+  ['hooks', 'View hook configurations for tool events'],
+  ['ide', 'Manage IDE integrations and show status'],
   ['init', 'Create a CLAUDE.md for the project'],
+  ['insights', 'Generate a report analyzing your Claude Code sessions'],
+  ['install-github-app', 'Set up Claude GitHub Actions for a repository'],
+  ['login', 'Sign in to your Anthropic account'],
+  ['logout', 'Sign out from your Anthropic account'],
   ['mcp', 'Manage MCP servers'],
-  ['memory', 'Edit memory files (CLAUDE.md)'],
-  ['model', 'Change the model'],
-  ['permissions', 'Manage permission rules'],
-  ['plugin', 'Manage plugins'],
-  ['reload-plugins', 'Reload plugins'],
-  ['reload-skills', 'Reload skills'],
-  ['rename', 'Rename the session'],
+  ['memory', 'Edit CLAUDE.md files and memory settings'],
+  ['mobile', 'Show QR code to download the Claude mobile app'],
+  ['model', 'Set the AI model for Claude Code'],
+  ['output-style', 'List output styles or switch to one'],
+  ['permissions', 'Manage allow and deny tool permission rules'],
+  ['plan', 'Turn on plan mode or view the plan'],
+  ['plugin', 'Manage Claude Code plugins'],
+  ['privacy-settings', 'View and update your privacy settings'],
+  ['recap', 'Generate a one-line session recap now'],
+  ['reload-plugins', 'Activate pending plugin changes in the current session'],
+  ['reload-skills', 'Pick up skills added or changed on disk during this session'],
+  ['remote-control', 'Use this session from claude.ai and the phone'],
+  ['rename', 'Rename the current conversation'],
   ['resume', 'Resume another conversation'],
-  ['review', 'Review a pull request'],
-  ['rewind', 'Rewind the conversation or code'],
   ['security-review', 'Security review of the pending changes'],
-  ['status', 'Show version, model and account'],
-  ['usage', 'Show plan usage limits'],
-  ['vim', 'Toggle vim mode']
+  ['session', 'Show cloud session URL and QR code'],
+  ['skills', 'List available skills'],
+  ['status', 'Show version, account, model, MCP servers, and setup warnings'],
+  ['tasks', "View and manage this session's background work"],
+  ['terminal-setup', 'Set up terminal key bindings'],
+  ['theme', 'Change the theme'],
+  ['tui', 'Set the terminal UI renderer (classic | fullscreen)'],
+  ['upgrade', 'Upgrade your plan for higher rate limits'],
+  ['usage', 'Show session cost, plan usage, and activity stats'],
+  ['version', "Show this session's version"],
+  ['workflows', 'Browse running and completed workflows']
 ]
 
 // name y description del frontmatter YAML (incluye descripciones en bloque con > o |).
@@ -197,10 +229,12 @@ const cache = new Map<string, { at: number; list: SlashCommand[] }>()
 const probes = new Map<string, Promise<string[] | null>>()
 const probed = new Map<string, { at: number; names: string[] }>()
 
-// Lista para un cwd: la del disco al instante; la completa (init) cuando está y se cachea 10 minutos.
-export async function listSlashCommandsFull(cwd: string): Promise<SlashCommand[]> {
+// Lista para un cwd. Con quick, la del disco al instante (más lo que ya haya dado el init, si está en caché);
+// si no, espera el init (unos segundos la primera vez; se cachea 10 minutos).
+export async function listSlashCommandsFull(cwd: string, quick = false): Promise<SlashCommand[]> {
   const disk = listSlashCommands(cwd)
   let hit = probed.get(cwd)
+  if (quick) return hit ? merge(disk, hit.names) : disk
   if (!hit || Date.now() - hit.at > 10 * 60_000) {
     let p = probes.get(cwd)
     if (!p) {
@@ -210,10 +244,16 @@ export async function listSlashCommandsFull(cwd: string): Promise<SlashCommand[]
     const names = await p
     if (names) probed.set(cwd, (hit = { at: Date.now(), names }))
   }
-  if (!hit) return disk
+  return hit ? merge(disk, hit.names) : disk
+}
+
+// Ocultos en la TUI (internos o renombrados) aunque el init los liste.
+const HIDDEN = new Set(['workflow-launch-exec', 'design-consent', 'design-revoke', 'extra-usage', 'heapdump'])
+
+function merge(disk: SlashCommand[], initNames: string[]): SlashCommand[] {
   const byName = new Map(disk.map((c) => [c.name, c]))
-  const fromInit = hit.names
-    .filter((n) => !n.startsWith('__'))
+  const fromInit = initNames
+    .filter((n) => !n.startsWith('__') && !HIDDEN.has(n))
     .map((n) => byName.get(n) ?? { name: n, description: '', source: n.includes(':') ? ('plugin' as const) : ('builtin' as const) })
   const names = new Set(fromInit.map((c) => c.name))
   // Comandos interactivos que no aparecen en modo -p (resume, exit, help…), desde la lista fija.

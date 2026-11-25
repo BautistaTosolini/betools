@@ -297,3 +297,16 @@ clawhip/
   quieta pisaba el valor con uno viejo (subía y bajaba). Ahora se combina por ventana (resets_at): dentro de la
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
+
+## v0.13.0 — Formularios MCP en Rendered, versión visible y autocompletado más rápido
+
+- Formularios de servidores MCP (elicitation, "MCP server … requests your input"): Rendered los muestra con un
+  campo por fila y su valor. Clic despliega las opciones de un campo, elige una opción o alterna un sí/no; los
+  campos de texto se escriben en la caja. Accept/Decline navegan hasta los botones de la TUI y confirman.
+  El formato de la pantalla se tomó de Claude Code 2.1.332 (menu-parser.ts, parseForm).
+- El encabezado muestra la versión instalada (v0.13.0), tomada de package.json al compilar.
+- Bloques de código: el borde de `code` se dibujaba por renglón dentro de `pre`; ahora el bloque no lo lleva.
+- Autocompletado de "/": lista de comandos propios de Claude Code actualizada desde el binario 2.1.332 (incluye
+  los interactivos que no vienen en el init: resume, copy, diff, theme, login…; sin cost, vim, review). Se
+  precarga al abrir la sesión: primero la lista instantánea (disco + fija) y después la del init, sin esperarla.
+  Sin filtro se ordena alfabéticamente.

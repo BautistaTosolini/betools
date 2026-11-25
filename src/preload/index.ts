@@ -78,7 +78,7 @@ const api = {
   pendingRestarts: (): Promise<string[]> => ipcRenderer.invoke('sessions:pendingRestart'),
   onPendingRestart: (cb: (id: string, on: boolean) => void) => on('session:pendingRestart', cb),
 
-  listSlashCommands: (sessionId: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', sessionId),
+  listSlashCommands: (sessionId: string, quick?: boolean): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', sessionId, quick),
 
   // Visor de Markdown dentro de betools.
   readDoc: (path: string): Promise<{ text: string; mtime: number }> => ipcRenderer.invoke('doc:read', path),

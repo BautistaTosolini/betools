@@ -53,6 +53,7 @@ input:focus, select:focus { outline: none; border-color: var(--link); box-shadow
 .page-header { height: 44px; padding: 0 12px 0 14px; gap: 10px; border-bottom: 1px solid var(--divider); background: var(--page); }
 .brand { display: flex; align-items: center; gap: 8px; }
 .brand-mark { width: 18px; height: 18px; display: block; }
+.brand-version { font-family: var(--mono); font-size: 11px; color: var(--muted); align-self: flex-end; padding-bottom: 2px; }
 .page-header h1 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
 .pill { font-size: 11px; font-weight: 500; padding: 1px 7px; border: 1px solid; white-space: nowrap; }
 .pill.working { color: var(--working); border-color: color-mix(in srgb, var(--working) 35%, transparent); }
@@ -184,6 +185,8 @@ input:focus, select:focus { outline: none; border-color: var(--link); box-shadow
 .md strong { color: var(--text); }
 .md code { font-family: var(--mono); background: var(--card-2); box-shadow: inset 0 0 0 1px var(--divider); }
 .md pre { background: #0b0b0d; border-color: var(--divider); }
+/* Dentro de un bloque el código no lleva fondo ni borde propio: en un elemento en línea se dibujaría por renglón. */
+.md pre code { background: none; box-shadow: none; padding: 0; }
 .md th, .md td { border-color: var(--border); padding: 6px 12px; }
 .md th { background: var(--card-2); font-size: 12px; font-weight: 600; color: var(--text-2); }
 .msg.tools summary, .msg.tools ul { font-family: var(--mono); font-size: 11.5px; }
@@ -236,6 +239,13 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .menu-option kbd { margin-top: 1px; min-width: 18px; text-align: center; background: var(--card); }
 .menu-option.on kbd { color: var(--text); border-color: #45454e; }
 .menu-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.form-field { display: flex; flex-direction: column; gap: 1px; }
+.form-mark { min-width: 18px; text-align: center; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.form-mark.required, .form-mark.error { color: var(--waiting); }
+.form-mark.done { color: var(--ok, #4ade80); }
+.form-value { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--text); }
+.form-value.empty { color: var(--muted); font-style: italic; }
+.form-choices { display: flex; flex-direction: column; gap: 1px; margin-left: 26px; }
 .menu-option-text small { color: var(--muted); font-size: 11.5px; }
 .menu-enter { color: var(--muted); font-size: 12px; margin-top: 1px; }
 .menu-check { width: 12px; height: 12px; margin-top: 3px; flex: none; box-shadow: inset 0 0 0 1px #55555e; }

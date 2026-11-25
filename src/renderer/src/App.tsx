@@ -337,6 +337,7 @@ export function App() {
         <div className="brand">
           <img className="brand-mark" src={logo} alt="" />
           <h1>betools</h1>
+          <span className="brand-version" title="Installed build">v{__APP_VERSION__}</span>
         </div>
         {workingCount > 0 && <span className="pill working">{workingCount} working</span>}
         {waitingCount > 0 && <span className="pill waiting">{waitingCount} need input</span>}

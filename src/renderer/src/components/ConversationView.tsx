@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import type { ConversationItem, SessionStatus, SlashCommand } from '../../../shared/types'
 import { onScreen, screenLines } from '../term-registry'
-import { KEYS, parseMenu, type Menu } from '../menu-parser'
+import { KEYS, parseMenu, type Form, type Menu } from '../menu-parser'
 import { useZoom } from '../zoom'
 import { useDraft } from '../drafts'
 import { readActivity, readCliInput, readQueued, type Activity, type CliInput } from '../term-registry'
@@ -170,7 +170,115 @@ function useMenuLock(menu: Menu): [boolean, () => boolean] {
   return [locked, take]
 }
 
+// Teclas para llevar el foco del formulario al campo `target` (fields.length = fila Accept/Decline). Un campo
+// desplegado se cierra antes con ←, porque ahí ↑/↓ recorren sus opciones.
+function formMove(form: Form, target: number): string[] {
+  const i = form.fields.findIndex((f) => f.focused)
+  const cur = form.button ? form.fields.length : i
+  if (cur < 0) return []
+  const keys: string[] = form.fields[cur]?.expanded ? [KEYS.left] : []
+  const d = target - cur
+  return [...keys, ...Array(Math.abs(d)).fill(d > 0 ? KEYS.down : KEYS.up)]
+}
+
+const FORM_MARK = { required: '*', done: '✓', error: '!', '': '' } as const
+
+// Formulario de un servidor MCP: cada campo es una fila; el enfocado muestra sus opciones. Accept/Decline
+// recorren los campos hasta los botones de la TUI (al bajar del último campo el foco cae en Accept).
+function FormPanel({ id, menu, form }: { id: string; menu: Menu; form: Form }) {
+  const key = (k: string) => api.input(id, k)
+  const [locked, take] = useMenuLock(menu)
+  const run = (keys: string[]) => {
+    if (keys.length && take()) sendKeys(id, keys)
+  }
+  const clickField = (i: number) => {
+    const f = form.fields[i]
+    if (!f.focused || form.button) return run(formMove(form, i))
+    if (f.kind === 'choice' && !f.expanded) run([KEYS.right])
+    else if (f.kind === 'bool') run([KEYS.space])
+    else if (f.kind === 'text') document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus()
+  }
+  const clickChoice = (j: number, choices: Form['fields'][number]['choices']) => {
+    const d = j - choices.findIndex((c) => c.cursor)
+    run([...Array(Math.abs(d)).fill(d > 0 ? KEYS.down : KEYS.up), KEYS.space])
+  }
+  const answer = (b: 'accept' | 'decline') => {
+    const keys = form.button ? [] : formMove(form, form.fields.length)
+    const at = form.button ?? 'accept'
+    if (at !== b) keys.push(b === 'decline' ? KEYS.right : KEYS.left)
+    run([...keys, KEYS.enter])
+  }
+  return (
+    <div className="menu-panel">
+      <div className="menu-eyebrow">
+        <span className="menu-badge">Needs your input</span>
+      </div>
+      {menu.header.filter((l) => l.trim()).map((l, i) =>
+        i === 0 ? (
+          <h3 key={i} className="menu-question">{l.trim()}</h3>
+        ) : (
+          <p key={i} className="menu-label">{l.trim()}</p>
+        )
+      )}
+      <div className={`menu-options ${locked ? 'locked' : ''}`} role="listbox">
+        {form.fields.map((f, i) => (
+          <div key={i} className="form-field">
+            <button
+              role="option"
+              aria-selected={f.focused && !form.button}
+              className={`menu-option ${f.focused && !form.button ? 'on' : ''}`}
+              disabled={locked}
+              onClick={() => clickField(i)}
+            >
+              <span className={`form-mark ${f.status}`}>{FORM_MARK[f.status]}</span>
+              <span className="menu-option-text">
+                <span>
+                  {f.label}
+                  <span className={`form-value ${f.value ? '' : 'empty'}`}>
+                    {f.kind === 'bool' ? (f.value === '☒' ? 'Yes' : 'No') : f.value || (f.kind === 'text' && f.focused ? 'type below' : 'not set')}
+                  </span>
+                </span>
+                {f.desc.length > 0 && <small>{f.desc.join(' ')}</small>}
+              </span>
+              {f.focused && !form.button && f.kind === 'choice' && !f.expanded && <span className="menu-enter">choose ▸</span>}
+              {f.focused && !form.button && f.kind === 'bool' && <span className="menu-enter">toggle</span>}
+            </button>
+            {f.expanded && f.choices.length > 0 && (
+              <div className="form-choices">
+                {f.choices.map((c, j) => (
+                  <button
+                    key={j}
+                    className={`menu-option ${c.cursor ? 'on' : ''}`}
+                    disabled={locked}
+                    onClick={() => clickChoice(j, f.choices)}
+                  >
+                    <span className={`menu-check ${c.on ? 'on' : ''}`} />
+                    <span className="menu-option-text"><span>{c.label}</span></span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="menu-keys">
+        <button className="key" onClick={() => key(KEYS.up)} title="Up">↑</button>
+        <button className="key" onClick={() => key(KEYS.down)} title="Down">↓</button>
+        <span style={{ flex: 1 }} />
+        <button className="btn-sm ghost" onClick={() => key(KEYS.esc)} title="Esc">Cancel</button>
+        <button className={`btn-sm ${form.button === 'decline' ? 'primary' : ''}`} disabled={locked} onClick={() => answer('decline')}>Decline</button>
+        <button className={`btn-sm ${form.button === 'decline' ? '' : 'primary'}`} disabled={locked} onClick={() => answer('accept')}>Accept</button>
+      </div>
+    </div>
+  )
+}
+
 function MenuPanel({ id, menu }: { id: string; menu: Menu }) {
+  if (menu.form) return <FormPanel id={id} menu={menu} form={menu.form} />
+  return <ChoicePanel id={id} menu={menu} />
+}
+
+function ChoicePanel({ id, menu }: { id: string; menu: Menu }) {
   const key = (k: string) => api.input(id, k)
   const [locked, take] = useMenuLock(menu)
   const choose = (n: number) => {
@@ -278,22 +386,34 @@ function useCliInput(id: string): CliInput | null {
   return v
 }
 
-// Lista de comandos por sesión (se pide una vez; el proceso principal la cachea por carpeta).
-const slashCache = new Map<string, Promise<SlashCommand[]>>()
-function loadSlash(id: string): Promise<SlashCommand[]> {
-  let p = slashCache.get(id)
-  if (!p) {
-    p = api.listSlashCommands(id).catch(() => [])
-    slashCache.set(id, p)
-    // Se vuelve a pedir pasados 10 minutos (skills nuevas, plugins).
-    setTimeout(() => slashCache.delete(id), 10 * 60_000)
+// Lista de comandos por sesión. Se precarga al abrir la sesión: primero la rápida (disco y lista fija, al
+// instante) y después la completa (init de Claude Code, unos segundos la primera vez por carpeta).
+const slashCache = new Map<string, { list: SlashCommand[] | null; full: boolean; at: number; subs: Set<(l: SlashCommand[]) => void> }>()
+function watchSlash(id: string, cb: (l: SlashCommand[]) => void): () => void {
+  let e = slashCache.get(id)
+  // Se vuelve a pedir pasados 10 minutos (skills nuevas, plugins); la lista vieja sirve mientras tanto.
+  if (!e || Date.now() - e.at > 10 * 60_000) {
+    const entry = { list: e?.list ?? null, full: false, at: Date.now(), subs: e?.subs ?? new Set<(l: SlashCommand[]) => void>() }
+    slashCache.set(id, (e = entry))
+    const set = (l: SlashCommand[], full: boolean) => {
+      if (entry.full && !full) return
+      entry.list = l
+      entry.full = full
+      entry.subs.forEach((f) => f(l))
+    }
+    api.listSlashCommands(id, true).then((l) => set(l, false), () => {})
+    api.listSlashCommands(id).then((l) => set(l, true), () => {})
   }
-  return p
+  e.subs.add(cb)
+  if (e.list) cb(e.list)
+  const subs = e.subs
+  return () => void subs.delete(cb)
 }
 
 function rank(list: SlashCommand[], q: string): SlashCommand[] {
   const query = q.toLowerCase()
-  if (!query) return list
+  // Sin filtro, en orden alfabético como la CLI (si no, quedaban primero las skills, en el orden del init).
+  if (!query) return [...list].sort((a, b) => a.name.localeCompare(b.name))
   const scored: [number, SlashCommand][] = []
   for (const c of list) {
     const n = c.name.toLowerCase()
@@ -315,8 +435,9 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
   const [pick, setPick] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
   useEffect(() => {
-    if (slashQuery !== null && commands === null) loadSlash(id).then(setCommands)
-  }, [slashQuery !== null, id])
+    setCommands(null)
+    return watchSlash(id, setCommands)
+  }, [id])
   const matches = useMemo(() => (slashQuery !== null && commands ? rank(commands, slashQuery).slice(0, 50) : []), [slashQuery, commands])
   const showSlash = slashQuery !== null && dismissed !== text
   useEffect(() => setPick(0), [slashQuery])
@@ -456,7 +577,8 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
             }
           }
           if (menu && !text) {
-            if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.altKey) {
+            // En un formulario los números se escriben (campos de texto); no eligen opciones.
+            if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.altKey && !menu.form) {
               e.preventDefault()
               if (!e.repeat) chooseOption(id, menu, Number(e.key))
               return
@@ -482,7 +604,11 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
       />
       <div className="composer-actions">
         <span className="composer-hint">
-          {menu ? (
+          {menu?.form ? (
+            <>
+              <kbd>↑</kbd><kbd>↓</kbd> field · <kbd>→</kbd> options · <kbd>Space</kbd> pick · <kbd>Esc</kbd> cancel
+            </>
+          ) : menu ? (
             <>
               <kbd>1-9</kbd> choose · <kbd>↑</kbd><kbd>↓</kbd> move · <kbd>Enter</kbd> confirm · <kbd>Esc</kbd> cancel
             </>
