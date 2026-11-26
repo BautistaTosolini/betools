@@ -228,7 +228,66 @@ test.describe('Rendered: dialogs', () => {
     await prompt(ctx, 'ask')
     await expect(ctx.page.locator('.menu-panel .menu-option')).toHaveCount(3)
     await composer(ctx.page).press('3')
-    await expect.poll(() => events(ctx).find((e) => e.ev === 'menu')?.choice).toBe('No, and tell Claude what to do differently (esc)')
+    await expect.poll(() => events(ctx).find((e) => e.ev === 'menu')?.choice).toBe('No')
+  })
+
+  test('permission menu: a written answer rejects with that feedback (No + Tab), never approves', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, 'ask')
+    await expect(p.locator('.menu-panel .menu-option')).toHaveCount(3)
+    await expect(composer(p)).toHaveAttribute('placeholder', /answers No/)
+    await composer(p).fill('usa otro directorio')
+    await composer(p).press('Enter')
+    await expect.poll(() => events(ctx).find((e) => e.ev === 'menu')).toMatchObject({ choice: 'No, usa otro directorio', feedback: 'usa otro directorio' })
+  })
+
+  test('AskUserQuestion: every option is shown, including "Chat about this" below the divider', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, 'question')
+    await expect(p.locator('.menu-panel .menu-option')).toHaveCount(4)
+    await expect(p.locator('.menu-panel .menu-question')).toHaveText('Which color do you want?')
+    await expect(p.locator('.menu-panel .menu-option').nth(2)).toContainText('write below')
+  })
+
+  test('AskUserQuestion: clicking "Type something." does not reject the question; the answer goes there', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, 'question')
+    await p.locator('.menu-panel .menu-option', { hasText: 'Type something.' }).click()
+    await expect(composer(p)).toBeFocused()
+    await expect(p.locator('.menu-panel .menu-option.on')).toContainText('Type something.')
+    // Antes se mandaba Enter y Claude Code lo tomaba como "Declined to answer".
+    expect(events(ctx).some((e) => e.ev === 'question')).toBe(false)
+    await composer(p).fill('verde agua')
+    await composer(p).press('Enter')
+    await expect.poll(() => events(ctx).find((e) => e.ev === "question")).toMatchObject({ answer: "verde agua", declined: false })
+  })
+
+  test('AskUserQuestion: writing without choosing first also answers in "Type something."', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, 'question')
+    await expect(p.locator('.menu-panel .menu-option')).toHaveCount(4)
+    await composer(p).press('3')
+    expect(events(ctx).some((e) => e.ev === 'question')).toBe(false)
+    await composer(p).fill('amarillo')
+    await composer(p).press('Enter')
+    await expect.poll(() => events(ctx).find((e) => e.ev === 'question')?.answer).toBe('amarillo')
+  })
+
+  test('a menu without a text answer does not send typed text (no option gets confirmed)', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, 'mcp')
+    await expect(p.locator('.menu-panel .menu-option')).toHaveCount(3)
+    await composer(p).fill('hola')
+    await composer(p).press('Enter')
+    await expect(p.locator('.composer-flash')).toContainText('no text answer')
+    await p.waitForTimeout(400)
+    expect(events(ctx).some((e) => e.ev === 'menu')).toBe(false)
+    await expect(composer(p)).toHaveValue('hola')
   })
 
   test('menu without numbers ("New MCP server found") is clickable', async () => {
@@ -340,6 +399,73 @@ test.describe('copy in the terminal', () => {
     await p.keyboard.press('Control+C')
     await expect.poll(() => events(ctx).some((e) => e.ev === 'ctrl-c')).toBe(true)
     expect(await clipboard(ctx)).toBe('unchanged')
+  })
+})
+
+test.describe('Rendered: command panels (/config, /usage…)', () => {
+  test('shows the panel and moves, toggles, switches tabs, searches and closes from Rendered', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await prompt(ctx, '/config')
+    const panel = p.locator('.tui-panel')
+    await expect(panel).toBeVisible()
+    await expect(panel.locator('.tui-row', { hasText: 'Auto-compact' })).toHaveClass(/on/)
+    // Sin la conversación de arriba.
+    await expect(panel).not.toContainText('Fake Claude ready')
+    await expect(composer(p)).toBeFocused()
+
+    // Clic en una fila: el cursor va ahí, salteando la línea que no se puede elegir.
+    await panel.locator('.tui-row', { hasText: 'Verbose output' }).click()
+    await expect(panel.locator('.tui-row.on')).toContainText('Verbose output')
+    await expect.poll(() => events(ctx).filter((e) => e.ev === 'panel').at(-1)?.cursor).toBe('Verbose output')
+
+    // Atajo de la línea de ayuda ("Space to toggle").
+    await panel.locator('.menu-keys .key', { hasText: 'toggle' }).click()
+    await expect.poll(() => events(ctx).find((e) => e.ev === 'panel' && e.action === 'toggle')).toMatchObject({ item: 'Verbose output', on: true })
+
+    // Doble clic: mueve y confirma (Enter).
+    const enters = () => events(ctx).filter((e) => e.ev === 'input' && e.data === '\r').length
+    const before = enters()
+    await panel.locator('.tui-row', { hasText: 'Show tips' }).dblclick()
+    await expect(panel.locator('.tui-row.on')).toContainText('Show tips')
+    await expect.poll(enters).toBe(before + 1)
+
+    // El teclado va al panel: el buscador recibe lo escrito.
+    await composer(p).focus()
+    await p.keyboard.type('verb')
+    await expect.poll(() => events(ctx).filter((e) => e.ev === 'panel').at(-1)?.search).toBe('verb')
+    await expect(composer(p)).toHaveValue('')
+
+    // Clic en una pestaña.
+    const tabRow = panel.locator('.tui-row', { hasText: /^\s*Settings\s/ })
+    const box = (await tabRow.boundingBox())!
+    const ch = await tabRow.evaluate((el) => {
+      const s = document.createElement('span')
+      s.textContent = 'M'.repeat(10)
+      el.appendChild(s)
+      const w = s.getBoundingClientRect().width / 10
+      s.remove()
+      return w
+    })
+    const line = await tabRow.innerText()
+    await p.mouse.click(box.x + 10 + (line.indexOf('Usage') + 2.5) * ch, box.y + box.height / 2)
+    await expect(panel).toContainText('Usage tab')
+
+    // Esc cierra el panel y vuelve la caja normal.
+    await p.keyboard.press('Escape')
+    await expect.poll(() => events(ctx).find((e) => e.ev === 'panel' && e.action === 'close')?.items).toMatchObject({ 'Verbose output': true })
+    await expect(panel).toHaveCount(0)
+  })
+
+  test('Shift+Tab and the mode in the footer cycle the permission mode', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await expect.poll(() => events(ctx).some((e) => e.ev === 'hook' && e.event === 'SessionStart')).toBe(true)
+    await composer(p).focus()
+    await p.keyboard.press('Shift+Tab')
+    await expect.poll(() => events(ctx).filter((e) => e.ev === 'input' && e.data === '\x1b[Z').length).toBe(1)
+    await p.locator('.cli-footer .cli-mode').click()
+    await expect.poll(() => events(ctx).filter((e) => e.ev === 'input' && e.data === '\x1b[Z').length).toBe(2)
   })
 })
 

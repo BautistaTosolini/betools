@@ -177,3 +177,98 @@ export function readLive(id: string): Live | null {
   }
   return { lines: out, footer }
 }
+
+// Fila de la pantalla con su estilo, para mostrar los paneles de Claude Code (/usage, /config…) con sus colores.
+export interface Run {
+  text: string
+  fg?: string
+  bg?: string
+  bold?: boolean
+  dim?: boolean
+  italic?: boolean
+  underline?: boolean
+  inverse?: boolean
+}
+
+const ANSI16 = ['#000000', '#cd3131', '#0dbc79', '#e5e510', '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5', '#666666', '#f14c4c', '#23d18b', '#f5f543', '#3b8eea', '#d670d6', '#29b8db', '#ffffff']
+
+function palette(i: number): string {
+  if (i < 16) return ANSI16[i]
+  if (i < 232) {
+    const n = i - 16
+    const c = (v: number) => (v ? 55 + v * 40 : 0)
+    return `rgb(${c(Math.floor(n / 36))},${c(Math.floor(n / 6) % 6)},${c(n % 6)})`
+  }
+  const g = 8 + (i - 232) * 10
+  return `rgb(${g},${g},${g})`
+}
+
+const hex = (n: number) => '#' + n.toString(16).padStart(6, '0')
+
+export function screenRuns(id: string, y0: number, y1: number): Run[][] {
+  const term = terms.get(id)
+  if (!term) return []
+  const buf = term.buffer.active
+  const cell = buf.getNullCell()
+  const rows: Run[][] = []
+  for (let y = y0; y < Math.min(y1, term.rows); y++) {
+    const line = buf.getLine(buf.viewportY + y)
+    const runs: Run[] = []
+    if (line) {
+      let cur: Run | null = null
+      let key = ''
+      for (let x = 0; x < line.length; x++) {
+        line.getCell(x, cell)
+        if (cell.getWidth() === 0) continue
+        const fg = cell.isFgRGB() ? hex(cell.getFgColor()) : cell.isFgPalette() ? palette(cell.getFgColor()) : undefined
+        const bg = cell.isBgRGB() ? hex(cell.getBgColor()) : cell.isBgPalette() ? palette(cell.getBgColor()) : undefined
+        const st: Omit<Run, 'text'> = {}
+        if (fg) st.fg = fg
+        if (bg) st.bg = bg
+        if (cell.isBold()) st.bold = true
+        if (cell.isDim()) st.dim = true
+        if (cell.isItalic()) st.italic = true
+        if (cell.isUnderline()) st.underline = true
+        if (cell.isInverse()) st.inverse = true
+        const k = JSON.stringify(st)
+        const ch = cell.getChars() || ' '
+        if (cur && k === key) cur.text += ch
+        else {
+          cur = { text: ch, ...st }
+          key = k
+          runs.push(cur)
+        }
+      }
+      // Sin el relleno de espacios sin estilo del final.
+      while (runs.length && !runs[runs.length - 1].bg && !runs[runs.length - 1].inverse && !runs[runs.length - 1].text.trim()) runs.pop()
+      if (runs.length && !runs[runs.length - 1].bg && !runs[runs.length - 1].inverse) runs[runs.length - 1].text = runs[runs.length - 1].text.trimEnd()
+    }
+    rows.push(runs)
+  }
+  return rows
+}
+
+// Fila donde está el cursor de la terminal. En los paneles, Claude Code lo deja en el elemento enfocado (la fila
+// con "❯" o el buscador), así que sirve para saber dónde está la selección.
+export function cursorRow(id: string): number | null {
+  const term = terms.get(id)
+  if (!term) return null
+  return term.buffer.active.cursorY
+}
+
+// Espera la próxima escritura en la pantalla (o el tiempo máximo).
+export function nextWrite(id: string, ms = 250): Promise<void> {
+  return new Promise((resolve) => {
+    let off = () => {}
+    const t = setTimeout(() => {
+      off()
+      resolve()
+    }, ms)
+    off = onScreen(id, () => {
+      clearTimeout(t)
+      off()
+      // Un frame de Claude Code puede llegar en varias escrituras.
+      setTimeout(resolve, 30)
+    })
+  })
+}

@@ -85,9 +85,13 @@ function interactive() {
   let busy = false
   let interrupted = false
 
-  function draw(lines) {
-    const body = lines.slice(-(rows - 1))
-    process.stdout.write('\x1b[H\x1b[2J' + body.join('\r\n'))
+  // focus: índice (en lines) de la fila enfocada; el cursor de la terminal queda ahí, como en Claude Code.
+  function draw(lines, focus = -1) {
+    const skip = Math.max(0, lines.length - (rows - 1))
+    const body = lines.slice(skip)
+    let out = '\x1b[H\x1b[2J' + body.join('\r\n')
+    if (focus >= skip) out += `\x1b[${focus - skip + 1};3H`
+    process.stdout.write(out)
   }
 
   function promptBox(extra = []) {
@@ -110,6 +114,76 @@ function interactive() {
       ])
     }
     if (mode.kind === 'form') return draw([...history.slice(-(rows - 22)), rule(), ...formLines()])
+    if (mode.kind === 'question') {
+      // AskUserQuestion, formato de Claude Code 2.1.332: "Type something." se escribe en la misma línea y
+      // "Chat about this" va debajo de otra línea divisoria.
+      const q = mode
+      const opt = (i, label, desc) => [`${q.cursor === i ? '❯' : ' '} ${i + 1}. ${label}`, ...(desc ? [`     ${desc}`] : [])]
+      const typed = q.text ? q.text : 'Type something.'
+      return draw([
+        ...history.slice(-(rows - 18)),
+        rule(),
+        ' ☐ Color ',
+        '',
+        'Which color do you want?',
+        '',
+        ...opt(0, 'Red', 'Warm'),
+        ...opt(1, 'Blue', 'Cool'),
+        ...opt(2, typed),
+        rule(),
+        ...opt(3, 'Chat about this'),
+        '',
+        `Enter to select · ↑/↓ to navigate${q.cursor === 2 ? ' · ctrl+g to edit in VS Code' : ''} · Esc to cancel`
+      ])
+    }
+    if (mode.kind === 'panel') return drawPanel()
+  }
+
+  // ---- panel de un comando (/config), formato de Claude Code 2.1.332 ----
+  const TABS = ['Status', 'Config', 'Usage']
+  function drawPanel() {
+    const p = mode
+    const tabs = '  Settings  ' + TABS.map((t, i) => (i === p.tab ? `\x1b[7m ${t} \x1b[27m` : ` ${t} `)).join(' ')
+    const out = [...history.slice(-(rows - 20)), '', '▔'.repeat(cols), tabs, '']
+    let focus = -1
+    if (TABS[p.tab] === 'Config') {
+      out.push('  ╭' + '─'.repeat(40) + '╮', `  │ ⌕ ${p.search || 'Search settings…'}`.padEnd(43) + '│', '  ╰' + '─'.repeat(40) + '╯')
+      p.items.forEach((it, i) => {
+        if (it.note) return out.push(`    ${it.label}`)
+        if (i === p.cursor) focus = out.length
+        out.push(`  ${i === p.cursor ? '❯' : ' '} ${it.label.padEnd(36)}${it.on ? 'on' : 'off'}`)
+      })
+      out.push('', '  ↑/↓ to navigate · Space to toggle · / to search · Esc to close')
+    } else {
+      out.push(`  ${TABS[p.tab]} tab`, '  Version:   fake', '', '  ←/→ to switch · Esc to close')
+    }
+    draw(out, focus)
+  }
+
+  function panelKey(k) {
+    const p = mode
+    const selectable = p.items.map((it, i) => (it.note ? -1 : i)).filter((i) => i >= 0)
+    const at = selectable.indexOf(p.cursor)
+    if (k === 'esc') {
+      log({ ev: 'panel', action: 'close', items: Object.fromEntries(p.items.filter((i) => !i.note).map((i) => [i.label, i.on])) })
+      history.push('  ⎿  Status dialog dismissed')
+      mode = { kind: 'prompt' }
+      busy = false
+      return render()
+    }
+    if (k === 'tab') p.tab = (p.tab + 1) % TABS.length
+    else if (k === 'right') p.tab = Math.min(TABS.length - 1, p.tab + 1)
+    else if (k === 'left') p.tab = Math.max(0, p.tab - 1)
+    else if (TABS[p.tab] !== 'Config') return render()
+    else if (k === 'down' && at + 1 < selectable.length) p.cursor = selectable[at + 1]
+    else if (k === 'up' && at > 0) p.cursor = selectable[at - 1]
+    else if (k === 'space') {
+      p.items[p.cursor].on = !p.items[p.cursor].on
+      log({ ev: 'panel', action: 'toggle', item: p.items[p.cursor].label, on: p.items[p.cursor].on })
+    } else if (k === 'backspace') p.search = (p.search ?? '').slice(0, -1)
+    else if (k.text) p.search = (p.search ?? '') + k.text
+    log({ ev: 'panel', action: 'key', tab: TABS[p.tab], cursor: p.items[p.cursor]?.label, search: p.search ?? '' })
+    render()
   }
 
   // ---- formulario MCP (mismo formato que Claude Code 2.1.332) ----
@@ -194,7 +268,27 @@ function interactive() {
     if (cmd === 'work') return work()
     if (cmd === 'ask') {
       hook('Notification', JSON.stringify({ notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }))
-      mode = { kind: 'menu', id: 'ask', numbered: true, cursor: 0, header: ['Bash command', '', '  rm -rf build', '', 'Do you want to proceed?'], options: ['Yes', "Yes, and don't ask again", 'No, and tell Claude what to do differently (esc)'], hint: 'Esc to cancel · Tab to amend' }
+      // Permiso de Claude Code 2.1.332: Tab sobre Yes/No agrega texto ("No, and tell Claude what to do differently").
+      mode = { kind: 'menu', id: 'ask', numbered: true, cursor: 0, header: ['Bash command', '', '  rm -rf build', '', 'Do you want to proceed?'], options: ['Yes', "Yes, and don't ask again", 'No'], hint: 'Esc to cancel · Tab to amend', amend: null }
+      return render()
+    }
+    if (cmd === 'question') {
+      mode = { kind: 'question', cursor: 0, text: '' }
+      return render()
+    }
+    if (cmd === '/config') {
+      mode = {
+        kind: 'panel',
+        tab: 1,
+        cursor: 0,
+        items: [
+          { label: 'Auto-compact', on: true },
+          { label: 'Show tips', on: true },
+          { label: "Thinking can't be turned off", note: true },
+          { label: 'Verbose output', on: false },
+          { label: 'Reduce motion', on: false }
+        ]
+      }
       return render()
     }
     if (cmd === 'mcp') {
@@ -261,8 +355,47 @@ function interactive() {
 
   // ---- teclado ----
   function key(k) {
+    if (mode.kind === 'question') {
+      const q = mode
+      if (k === 'up') q.cursor = Math.max(0, q.cursor - 1)
+      else if (k === 'down') q.cursor = Math.min(3, q.cursor + 1)
+      else if (k === 'esc') {
+        log({ ev: 'question', answer: null, declined: true })
+        history.push('● User declined to answer questions')
+        return endTurn()
+      } else if (k === 'enter') {
+        // Como Claude Code: Enter en "Type something." vacío rechaza la pregunta.
+        const answer = q.cursor === 2 ? q.text || null : ['Red', 'Blue', null, 'chat'][q.cursor]
+        log({ ev: 'question', answer, declined: answer === null })
+        history.push(answer === null ? '● Declined to answer Claude\'s questions' : `● Answered: ${answer}`)
+        assistant([{ type: 'text', text: answer === null ? 'Declined.' : `Answer: ${answer}` }])
+        return endTurn()
+      } else if (q.cursor === 2 && k === 'backspace') q.text = q.text.slice(0, -1)
+      else if (q.cursor === 2 && (k.text || k === 'space')) q.text += k.text ?? ' '
+      return render()
+    }
+    if (mode.kind === 'panel') return panelKey(k)
     if (mode.kind === 'menu') {
       const m = mode
+      if (m.amend !== null && m.amend !== undefined) {
+        // Escribiendo en "No, and tell Claude…": el texto va a la opción; Enter confirma con ese texto.
+        if (k === 'enter') {
+          log({ ev: 'menu', id: m.id, choice: m.options[m.cursor], feedback: m.amend })
+          history.push(`● You chose: ${m.options[m.cursor]} (${m.amend})`)
+          return endTurn()
+        }
+        if (k === 'backspace') m.amend = m.amend.slice(0, -1)
+        else if (k.text || k === 'space') m.amend += k.text ?? ' '
+        else if (k === 'esc') m.amend = null
+        else if (k === 'tab') m.amend = null
+        if (m.amend !== null) m.options[m.cursor] = m.amend ? `${m.options[m.cursor].split(',')[0]}, ${m.amend}` : `${m.options[m.cursor].split(',')[0]}, and tell Claude what to do differently`
+        return render()
+      }
+      if (k === 'tab' && m.hint.includes('Tab to amend') && /^(Yes|No)$/.test(m.options[m.cursor])) {
+        m.amend = ''
+        m.options[m.cursor] = `${m.options[m.cursor]}, and tell Claude what to do differently`
+        return render()
+      }
       if (k === 'up') m.cursor = (m.cursor + m.options.length - 1) % m.options.length
       else if (k === 'down') m.cursor = (m.cursor + 1) % m.options.length
       else if (k.text && /^[1-9]$/.test(k.text) && m.numbered) m.cursor = Math.min(m.options.length - 1, Number(k.text) - 1)
@@ -302,8 +435,13 @@ function interactive() {
   const KEYS = { '\x1b[A': 'up', '\x1b[B': 'down', '\x1b[C': 'right', '\x1b[D': 'left', '\r': 'enter', '\x7f': 'backspace', ' ': 'space', '\x1b': 'esc', '\t': 'tab' }
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   process.stdin.setEncoding('utf8')
+  // Como una terminal real, varias teclas pueden llegar juntas en un mismo bloque: se separan en secuencias.
+  const TOKEN = /\x1b\[200~[\s\S]*?\x1b\[201~|\x1b\[[0-9;]*[A-Za-z~]|\x1b|\r|\x7f|\t|\x03|[^\x1b\r\x7f\t\x03]+/g
   process.stdin.on('data', (data) => {
     log({ ev: 'input', data })
+    for (const tok of data.match(TOKEN) ?? []) onToken(tok)
+  })
+  function onToken(data) {
     if (data === '\x03') return log({ ev: 'ctrl-c' })
     // Pegado (bracketed paste): llega como texto.
     const pasted = /^\x1b\[200~([\s\S]*)\x1b\[201~$/.exec(data)
@@ -311,7 +449,7 @@ function interactive() {
     if (KEYS[data]) return key(mode.kind === 'prompt' && data === ' ' ? { text: ' ' } : KEYS[data])
     if (data === ' ' && mode.kind === 'form') return key('space')
     key({ text: data })
-  })
+  }
 
   hook('SessionStart')
   write({ type: 'system', subtype: 'informational', content: 'Fake session started', isMeta: true, level: 'notice' })
