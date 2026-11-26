@@ -6,3 +6,4 @@ web/master.key
 *.tar
 test-results/
 playwright-report/
+target/
