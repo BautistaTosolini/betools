@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EnvScope } from '../shared/types'
 import type { LocalStore } from './env-core'
 
-export { awsProfiles, resolveEnv, resolveRef, validateName, type ResolvedEnv } from './env-core'
+export { awsProfiles, EnvExistsError, moveEnv, resolveEnv, resolveRef, validateName, type ResolvedEnv } from './env-core'
 
 const keyOf = (scope: EnvScope, name: string) => `${scope.kind}:${scope.id}:${name}`
 

@@ -1,11 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
-import type { ConversationItem, SessionStatus, SlashCommand } from '../../../shared/types'
+import type { ConversationItem, SessionStatus, SlashCommand, ToolCall } from '../../../shared/types'
 import { onScreen, screenLines } from '../term-registry'
 import { KEYS, parseMenu, type Form, type Menu } from '../menu-parser'
 import { useZoom } from '../zoom'
 import { useDraft } from '../drafts'
-import { readActivity, readCliInput, readQueued, type Activity, type CliInput } from '../term-registry'
+import { readActivity, readCliInput, readLive, readQueued, type Activity, type CliInput, type Live } from '../term-registry'
 
 const api = window.clawhip
 
@@ -658,6 +658,98 @@ function useActivity(id: string, working: boolean): Activity | null {
   return a
 }
 
+// Zona en vivo y barra de estado de la CLI (ver readLive).
+function useLive(id: string): Live | null {
+  const [v, setV] = useState<Live | null>(null)
+  useEffect(() => {
+    let raf = 0
+    const read = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const next = readLive(id)
+        setV((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+      })
+    }
+    read()
+    const off = onScreen(id, read)
+    return () => {
+      off()
+      cancelAnimationFrame(raf)
+    }
+  }, [id])
+  return v
+}
+
+// Herramientas seguidas: plegadas en una línea (la última y el total); abiertas mientras alguna corre.
+function ToolGroup({ items }: { items: ConversationItem[] }) {
+  const running = items.some((t) => t.tool && !t.tool.done)
+  const errors = items.filter((t) => t.tool?.error).length
+  const last = items[items.length - 1]
+  const [open, setOpen] = useState(running)
+  useEffect(() => {
+    if (running) setOpen(true)
+  }, [running])
+  return (
+    <details className="msg tools" open={open} onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary>
+        {running ? <span className="tool-state running" /> : '⚙'} {last.text}
+        {items.length > 1 && <span className="muted"> (+{items.length - 1} more)</span>}
+        {errors > 0 && <span className="tool-errors"> · {errors} failed</span>}
+      </summary>
+      <ul>
+        {items.map((t, i) => (
+          <ToolRow key={i} item={t} />
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+// Una herramienta: ícono de estado, resumen, y al desplegar la entrada completa, los cambios y el resultado.
+function ToolRow({ item }: { item: ConversationItem }) {
+  const t = item.tool
+  if (!t) return <li className="tool-row legacy">{item.text}</li>
+  const state = !t.done ? 'running' : t.error ? 'error' : 'ok'
+  return (
+    <li className={`tool-row ${state}`}>
+      <details>
+        <summary>
+          <span className={`tool-state ${state}`} />
+          <span className="tool-text">{item.text}</span>
+          {t.done && t.result && !t.error && <span className="tool-lines">{lineCount(t.result)}</span>}
+        </summary>
+        <div className="tool-body">
+          {t.edits ? (
+            <>
+              <div className="tool-label">{t.input}</div>
+              {t.edits.map((e, i) => (
+                <pre key={i} className="tool-diff">
+                  {e.old && e.old.split('\n').map((l, j) => <span key={'o' + j} className="del">- {l}{'\n'}</span>)}
+                  {e.new.split('\n').map((l, j) => <span key={'n' + j} className="add">+ {l}{'\n'}</span>)}
+                </pre>
+              ))}
+            </>
+          ) : (
+            <pre className="tool-input">{t.input}</pre>
+          )}
+          {t.done ? (
+            t.result ? <pre className={`tool-result ${t.error ? 'error' : ''}`}>{t.result}</pre> : <div className="tool-label">(no output)</div>
+          ) : (
+            <div className="tool-label">Running…</div>
+          )}
+        </div>
+      </details>
+    </li>
+  )
+}
+
+function lineCount(s: string): string {
+  const n = s.split('\n').length
+  return n === 1 ? '1 line' : `${n} lines`
+}
+
+const NOTICE_ICON = { info: 'ℹ', warn: '⚠', error: '✗', done: '✓' } as const
+
 // Mensajes encolados (los que mandaste mientras Claude trabajaba), leídos de la pantalla de la CLI.
 function useQueued(id: string): string[] {
   const [q, setQ] = useState<string[]>([])
@@ -700,6 +792,7 @@ export function ConversationView({
   const chatZoom = useZoom('chat')
   const queued = useQueued(id)
   const activity = useActivity(id, status === 'working')
+  const live = useLive(id)
 
   // Desde qué ítem se anima la aparición: solo lo que llega mientras mirás la conversación. El historial y lo
   // que llegó estando en otra pestaña se muestra de una (al volver no se re-anima).
@@ -715,16 +808,23 @@ export function ConversationView({
     if (!visible && items) streamFrom.current = items.length
   }, [visible, items])
 
-  // Mientras el texto aparece, el alto crece sin que cambien los ítems: se sigue el final si estabas abajo.
-  useEffect(() => {
+  // Si estabas abajo, se sigue el final cuando cambia cualquier alto: el texto que aparece, una vista previa que
+  // termina de cargar, o el área visible que se achica porque aparece el menú o la línea de actividad (al volver
+  // de otra pestaña pasaba eso y la conversación quedaba arriba).
+  const innerRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
     const el = scrollRef.current
-    if (!el || !visible) return
-    const mo = new MutationObserver(() => {
+    const inner = innerRef.current
+    if (!el || !inner || !visible) return
+    const follow = () => {
       if (stick.current) el.scrollTop = el.scrollHeight
-    })
-    mo.observe(el, { childList: true, subtree: true, characterData: true })
-    return () => mo.disconnect()
-  }, [visible, items === null])
+    }
+    follow()
+    const ro = new ResizeObserver(follow)
+    ro.observe(el)
+    ro.observe(inner)
+    return () => ro.disconnect()
+  }, [visible])
 
   useEffect(
     () =>
@@ -762,6 +862,7 @@ export function ConversationView({
   return (
     <div className="conversation-wrap" style={{ zoom: chatZoom }}>
       <div className="conversation" ref={scrollRef} onScroll={onScroll} onClick={onClick}>
+        <div className="conversation-inner" ref={innerRef}>
         {items === null && <p className="muted pad">Loading…</p>}
         {items?.length === 0 && <p className="muted pad">No messages yet. Write your first prompt below.</p>}
         {from > 0 && (
@@ -771,17 +872,7 @@ export function ConversationView({
         )}
         {blocks.map((b) =>
           b.kind === 'tools' ? (
-            <details key={b.key} className="msg tools">
-              <summary>
-                ⚙ {b.items[b.items.length - 1].text}
-                {b.items.length > 1 && <span className="muted"> (+{b.items.length - 1} more)</span>}
-              </summary>
-              <ul>
-                {b.items.map((t, i) => (
-                  <li key={i}>{t.text}</li>
-                ))}
-              </ul>
-            </details>
+            <ToolGroup key={b.key} items={b.items} />
           ) : b.item.kind === 'user' ? (
             <div key={b.key} className="msg user">
               <div className="msg-head">
@@ -792,6 +883,16 @@ export function ConversationView({
           ) : b.item.kind === 'assistant' ? (
             <div key={b.key} className="msg assistant">
               <Markdown text={b.item.text} stream={b.key >= streamFrom.current} />
+            </div>
+          ) : b.item.kind === 'thinking' ? (
+            <details key={b.key} className="msg thinking">
+              <summary>✻ Thinking</summary>
+              <Markdown text={b.item.text} />
+            </details>
+          ) : b.item.kind === 'notice' ? (
+            <div key={b.key} className={`msg notice ${b.item.level ?? 'info'}`}>
+              <span className="notice-icon">{NOTICE_ICON[b.item.level ?? 'info']}</span>
+              <span>{b.item.text}</span>
             </div>
           ) : b.item.kind === 'answers' ? (
             <div key={b.key} className="msg answers">
@@ -831,6 +932,7 @@ export function ConversationView({
             <UserText text={q} />
           </div>
         ))}
+        </div>
       </div>
       {activity && (
         <div className="activity">
@@ -840,6 +942,8 @@ export function ConversationView({
           {activity.tip && <span className="activity-tip">{activity.tip}</span>}
         </div>
       )}
+      {live && live.lines.length > 0 && <pre className="live-pane">{live.lines.join('\n')}</pre>}
+      {live && live.footer.length > 0 && <div className="cli-footer">{live.footer.join('  ·  ')}</div>}
       <Composer id={id} status={status} onOpenCli={onReply} />
     </div>
   )

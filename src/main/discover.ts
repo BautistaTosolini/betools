@@ -1,4 +1,4 @@
-import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { DiscoveredSession } from '../shared/types'
@@ -70,6 +70,8 @@ interface Raw {
 export function discoverSessions(exclude: Set<string>, limit = 300): DiscoveredSession[] {
   const root = join(homedir(), '.claude', 'projects')
   const files: { id: string; dir: string; path: string; mtime: number; size: number }[] = []
+  // Sin ~/.claude/projects (Claude Code nunca se usó en este equipo) no hay nada que importar.
+  if (!existsSync(root)) return []
   for (const dir of readdirSync(root, { withFileTypes: true })) {
     if (!dir.isDirectory()) continue
     for (const f of readdirSync(join(root, dir.name))) {

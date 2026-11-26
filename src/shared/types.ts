@@ -134,11 +134,28 @@ export interface DailyTokens {
 // command: slash command o "!" · summary: marca de compactación
 export interface ConversationItem {
   // answers: respuestas a AskUserQuestion (text = JSON [{q, a}])
-  kind: 'user' | 'assistant' | 'tool' | 'command' | 'summary' | 'answers'
+  // thinking: razonamiento de Claude (solo cuando el transcript lo trae con texto)
+  // notice: avisos de Claude Code (resumen al volver, tarea en segundo plano terminada, error de hook…)
+  kind: 'user' | 'assistant' | 'tool' | 'command' | 'summary' | 'answers' | 'thinking' | 'notice'
   text: string
   at: string
   // Respuesta a la que pertenece (los bloques de texto de una misma respuesta se juntan).
   msgId?: string
+  tool?: ToolCall
+  // notice: tipo, para el ícono y el color
+  level?: 'info' | 'warn' | 'error' | 'done'
+}
+
+// Llamada a una herramienta con su resultado (el ítem se actualiza cuando llega el resultado).
+export interface ToolCall {
+  id: string
+  name: string
+  input: string // entrada completa, legible (comando, ruta, JSON…)
+  result?: string // recortado
+  error?: boolean
+  done: boolean
+  // Edit/MultiEdit: cambios como texto viejo → nuevo
+  edits?: { old: string; new: string }[]
 }
 
 // Comando o skill para el autocompletado de "/" en Rendered.

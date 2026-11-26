@@ -58,8 +58,21 @@ export class TranscriptParser {
     return this.lastModel
   }
 
-  // Conversación para la pestaña Rendered. Solo crece (se agregan ítems o se extiende el último).
+  // Conversación para la pestaña Rendered. Crece, y además un ítem de herramienta se reemplaza cuando llega su
+  // resultado; changedFrom marca el primer índice tocado desde la última lectura (takeChangedFrom).
   readonly items: ConversationItem[] = []
+  private changedFrom = Infinity
+  private readonly toolIndex = new Map<string, number>()
+
+  takeChangedFrom(): number {
+    const v = this.changedFrom
+    this.changedFrom = Infinity
+    return v
+  }
+
+  private touch(i: number): void {
+    if (i < this.changedFrom) this.changedFrom = i
+  }
 
   // /rename gana sobre el título generado por Claude.
   title(): string | null {
@@ -151,9 +164,35 @@ export class TranscriptParser {
     // Bloques de texto consecutivos de la misma respuesta: un solo ítem.
     if (item.kind === 'assistant' && last?.kind === 'assistant' && item.msgId && last.msgId === item.msgId) {
       this.items[this.items.length - 1] = { ...last, text: `${last.text}\n\n${item.text}` }
+      this.touch(this.items.length - 1)
       return
     }
+    if (item.tool) this.toolIndex.set(item.tool.id, this.items.length)
+    this.touch(this.items.length)
     this.items.push(item)
+  }
+
+  // Resultado de una herramienta: completa su ítem.
+  private toolResult(c: any, d: any): void {
+    const i = this.toolIndex.get(c.tool_use_id)
+    if (i === undefined) return
+    const item = this.items[i]
+    if (!item?.tool) return
+    this.toolIndex.delete(c.tool_use_id)
+    const raw =
+      typeof c.content === 'string'
+        ? c.content
+        : Array.isArray(c.content)
+          ? c.content.map((b: any) => (b?.type === 'text' ? b.text : b?.type === 'image' ? '[image]' : '')).join('\n')
+          : ''
+    // Bash trae stdout y stderr por separado en toolUseResult; si no, el contenido del resultado.
+    const tur = d.toolUseResult
+    const text =
+      tur && typeof tur === 'object' && typeof tur.stdout === 'string'
+        ? [tur.stdout, tur.stderr].filter((x: string) => x && x.trim()).join('\n')
+        : raw
+    this.items[i] = { ...item, tool: { ...item.tool, result: clip(stripTags(text), RESULT_MAX), error: !!c.is_error, done: true } }
+    this.touch(i)
   }
 
   private conversation(d: any): void {
@@ -176,6 +215,19 @@ export class TranscriptParser {
       }
       return
     }
+    // Avisos de Claude Code: resumen al volver, informativos, errores de hooks, duración del turno.
+    if (d.type === 'system' && !d.isSidechain) {
+      const st = d.subtype
+      if (st === 'away_summary' && typeof d.content === 'string')
+        return this.push_({ kind: 'notice', level: 'info', text: `Recap: ${d.content.replace(/\s*\(turn off recaps[^)]*\)\s*$/, '')}`, at })
+      if (st === 'informational' && typeof d.content === 'string') return this.push_({ kind: 'notice', level: 'info', text: d.content, at })
+      if (st === 'model_refusal_fallback' && typeof d.content === 'string') return this.push_({ kind: 'notice', level: 'warn', text: d.content, at })
+      if (st === 'turn_duration' && typeof d.durationMs === 'number')
+        return this.push_({ kind: 'notice', level: 'done', text: `Worked for ${duration(d.durationMs)}`, at })
+      if (st === 'stop_hook_summary' && Array.isArray(d.hookErrors) && d.hookErrors.length)
+        return this.push_({ kind: 'notice', level: 'error', text: `Stop hook error: ${d.hookErrors.map(String).join(' · ')}`, at })
+      if (/error/i.test(st ?? '') && typeof d.content === 'string') return this.push_({ kind: 'notice', level: 'error', text: d.content, at })
+    }
     // Mensaje que mandaste mientras Claude trabajaba y que tomó a mitad del turno.
     const att = d.type === 'attachment' ? d.attachment : null
     if (att?.type === 'queued_command' && typeof att.prompt === 'string' && (att.origin?.kind === 'human' || att.humanTurn)) {
@@ -186,6 +238,9 @@ export class TranscriptParser {
     if (answers && typeof answers === 'object' && !Array.isArray(answers)) {
       const list = Object.entries(answers).map(([q, a]) => ({ q, a: String(a) }))
       if (list.length) this.push_({ kind: 'answers', text: JSON.stringify(list), at })
+    }
+    if (d.type === 'user' && Array.isArray(content)) {
+      for (const c of content) if (c?.type === 'tool_result' && c.tool_use_id) this.toolResult(c, d)
     }
     if (d.type === 'user') {
       if (d.isCompactSummary) return this.push_({ kind: 'summary', text: 'Conversation compacted', at })
@@ -210,8 +265,15 @@ export class TranscriptParser {
           this.push_({ kind: 'command', text: `! ${bash[1].trim()}`, at })
           continue
         }
+        // Tarea en segundo plano terminada (comando, agente, workflow): aviso con su resumen.
+        if (t.startsWith('<task-notification>')) {
+          const sum = /<summary>([\s\S]*?)<\/summary>/.exec(t)?.[1]?.trim()
+          const status = /<status>([^<]*)<\/status>/.exec(t)?.[1]?.trim() ?? ''
+          if (sum) this.push_({ kind: 'notice', level: /fail|error|kill|stop/i.test(status) ? 'error' : 'done', text: sum, at })
+          continue
+        }
         // Salidas de comandos locales, avisos internos y recordatorios del sistema: no son mensajes tuyos.
-        if (/^<(local-command|bash-std|system-reminder|task-notification|command-)/.test(t)) continue
+        if (/^<(local-command|bash-std|system-reminder|command-)/.test(t)) continue
         // Interrupción con Esc/Ctrl+C: va como separador, no como mensaje tuyo.
         if (/^\[Request interrupted by user/.test(t)) {
           this.push_({ kind: 'summary', text: INTERRUPTED, at })
@@ -226,8 +288,17 @@ export class TranscriptParser {
       for (const c of content) {
         if (c?.type === 'text' && typeof c.text === 'string' && c.text.trim()) {
           this.push_({ kind: 'assistant', text: c.text, at, msgId })
-        } else if (c?.type === 'tool_use') {
-          this.push_({ kind: 'tool', text: toolSummary(c.name, c.input ?? {}), at, msgId })
+        } else if (c?.type === 'thinking' && typeof c.thinking === 'string' && c.thinking.trim()) {
+          this.push_({ kind: 'thinking', text: c.thinking.trim(), at, msgId })
+        } else if ((c?.type === 'tool_use' || c?.type === 'server_tool_use') && c.id) {
+          const input = c.input ?? {}
+          this.push_({
+            kind: 'tool',
+            text: toolSummary(c.name, input),
+            at,
+            msgId,
+            tool: { id: c.id, name: c.name, input: clip(toolInput(c.name, input), INPUT_MAX), done: false, edits: toolEdits(c.name, input) }
+          })
         }
       }
     }
@@ -287,6 +358,45 @@ export class TranscriptParser {
     a.ops--
     if (a.ops <= 0) this.artifacts.delete(op.path)
   }
+}
+
+const RESULT_MAX = 6000
+const INPUT_MAX = 4000
+
+function clip(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) + `\n… (${s.length - max} more characters)` : s
+}
+
+// Recordatorios del sistema pegados al resultado de una herramienta: no son parte de la salida.
+function stripTags(s: string): string {
+  return s.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').replace(/\x1b\[[0-9;]*m/g, '').trim()
+}
+
+function duration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  return m < 60 ? `${m}m ${s % 60}s` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+// Entrada completa de la herramienta: el comando o la ruta tal cual; si no, el JSON.
+function toolInput(name: string, input: any): string {
+  if (name === 'Bash' && typeof input.command === 'string') return (input.description ? `# ${input.description}\n` : '') + input.command
+  if ((name === 'Edit' || name === 'MultiEdit' || name === 'Write' || name === 'Read' || name === 'NotebookEdit') && (input.file_path || input.notebook_path))
+    return input.file_path ?? input.notebook_path
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return ''
+  }
+}
+
+function toolEdits(name: string, input: any): { old: string; new: string }[] | undefined {
+  const cut = (x: unknown) => clip(typeof x === 'string' ? x : '', 3000)
+  if (name === 'Edit') return [{ old: cut(input.old_string), new: cut(input.new_string) }]
+  if (name === 'MultiEdit' && Array.isArray(input.edits)) return input.edits.slice(0, 20).map((e: any) => ({ old: cut(e.old_string), new: cut(e.new_string) }))
+  if (name === 'Write') return [{ old: '', new: cut(input.content) }]
+  return undefined
 }
 
 // Una línea por herramienta: el dato más representativo de su entrada.

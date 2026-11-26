@@ -1,4 +1,4 @@
-import { clipboard, contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
 import type { Artifact, ConversationItem, SlashCommand, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
 
 function on<T extends unknown[]>(channel: string, cb: (...args: T) => void): () => void {
@@ -55,6 +55,9 @@ const api = {
   setEnv: (scope: EnvScope, name: string, source: EnvSource, value?: string): Promise<void> =>
     ipcRenderer.invoke('env:set', scope, name, source, value),
   deleteEnv: (scope: EnvScope, name: string): Promise<void> => ipcRenderer.invoke('env:delete', scope, name),
+  envMoveTargets: (scope: EnvScope): Promise<{ scope: EnvScope; label: string }[]> => ipcRenderer.invoke('env:moveTargets', scope),
+  moveEnv: (from: EnvScope, to: EnvScope, name: string, overwrite?: boolean): Promise<void> =>
+    ipcRenderer.invoke('env:move', from, to, name, overwrite),
   testEnvRef: (source: EnvSource): Promise<{ ok: boolean; length: number }> => ipcRenderer.invoke('env:test', source),
   awsProfiles: (): Promise<string[]> => ipcRenderer.invoke('env:awsProfiles'),
   secureStorage: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('env:secureStorage'),
@@ -89,8 +92,10 @@ const api = {
   // Zoom de toda la ventana (el del chat se hace en el renderer).
   setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
 
-  readClipboard: () => clipboard.readText(),
-  writeClipboard: (text: string) => clipboard.writeText(text)
+  // El portapapeles va por el proceso principal: el módulo clipboard ya no está disponible en el preload de
+  // Electron 45 (llegaba undefined y copiar/pegar fallaba sin error visible).
+  readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text: string): Promise<void> => ipcRenderer.invoke('clipboard:write', text)
 }
 
 contextBridge.exposeInMainWorld('clawhip', api)

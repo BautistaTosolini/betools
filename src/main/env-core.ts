@@ -100,3 +100,48 @@ export async function resolveEnv(
   const secret = [...effective.values()].filter((e) => e.meta.source.kind !== 'plain').map((e) => e.meta.name)
   return { env, names: secret.filter((n) => n in env).sort(), errors }
 }
+
+// Lo mínimo que necesita moveEnv del almacén de metadatos y del de valores cifrados.
+export interface EnvMetaStore {
+  envOf(scope: EnvScope): EnvVarMeta[]
+  setEnv(scope: EnvScope, meta: EnvVarMeta): void
+  deleteEnv(scope: EnvScope, name: string): void
+}
+export interface LocalStoreRW extends LocalStore {
+  set(scope: EnvScope, name: string, value: string): void
+  delete(scope: EnvScope, name: string): void
+}
+
+export class EnvExistsError extends Error {
+  constructor(name: string) {
+    super(`${name} already exists in the destination.`)
+    this.name = 'EnvExistsError'
+  }
+}
+
+// Mueve una variable entre ámbitos (sesión ↔ carpeta). El valor cifrado se re-cifra con la clave
+// del destino sin pasar por la interfaz. Primero se escribe el destino y recién después se borra
+// el origen: si algo falla a mitad de camino, la variable queda duplicada, nunca perdida.
+export function moveEnv(
+  meta: EnvMetaStore,
+  local: LocalStoreRW,
+  from: EnvScope,
+  to: EnvScope,
+  name: string,
+  overwrite = false
+): void {
+  if (from.kind === to.kind && from.id === to.id) throw new Error('Source and destination are the same.')
+  const v = meta.envOf(from).find((e) => e.name === name)
+  if (!v) throw new Error(`${name} does not exist in the source.`)
+  if (!overwrite && meta.envOf(to).some((e) => e.name === name)) throw new EnvExistsError(name)
+  if (v.source.kind === 'local') {
+    const value = local.get(from, name)
+    if (value === null) throw new Error(`${name} has no stored value to move.`)
+    local.set(to, name, value)
+  } else {
+    local.delete(to, name) // si el destino tenía una local con ese nombre, su valor cifrado sobra
+  }
+  meta.setEnv(to, { name, source: { ...v.source }, updatedAt: new Date().toISOString() })
+  local.delete(from, name)
+  meta.deleteEnv(from, name)
+}

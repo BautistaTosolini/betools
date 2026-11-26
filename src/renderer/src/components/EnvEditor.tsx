@@ -197,18 +197,24 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
 interface Props {
   scope: EnvScope
   // Variables heredadas (de la carpeta) que se muestran como referencia y se pueden pisar.
-  inherited?: { label: string; vars: EnvVarMeta[] }
+  inherited?: { scope: EnvScope; label: string; vars: EnvVarMeta[] }
   onChange?(): void
 }
+
+type Target = { scope: EnvScope; label: string }
+// Solo el escritorio tiene carpetas: la versión web no expone mover.
+const CAN_MOVE = typeof (api as { moveEnv?: unknown }).moveEnv === 'function'
 
 export function EnvEditor({ scope, inherited, onChange }: Props) {
   const [vars, setVars] = useState<EnvVarMeta[]>([])
   const [form, setForm] = useState<{ existing?: EnvVarMeta; name?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [targets, setTargets] = useState<Target[]>([])
 
   const load = () => api.listEnv(scope).then(setVars)
   useEffect(() => {
     load()
+    if (CAN_MOVE) api.envMoveTargets(scope).then(setTargets)
   }, [scope.kind, scope.id])
 
   const done = async () => {
@@ -221,6 +227,24 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
     if (!window.confirm(`Delete the variable ${v.name}?${v.source.kind === 'local' ? '\n\nThe encrypted value is removed.' : ''}`)) return
     try {
       await api.deleteEnv(scope, v.name)
+      await done()
+    } catch (e) {
+      setError(errMsg(e))
+    }
+  }
+
+  // Mueve una variable entre la sesión y su carpeta. Si el destino ya la tiene, ofrece reemplazarla.
+  const move = async (from: EnvScope, to: EnvScope, toLabel: string, v: EnvVarMeta, warn = '') => {
+    if (!window.confirm(`Move ${v.name} to ${toLabel}?${warn}`)) return
+    setError(null)
+    try {
+      try {
+        await api.moveEnv(from, to, v.name)
+      } catch (e) {
+        if (!errMsg(e).startsWith('EXISTS:')) throw e
+        if (!window.confirm(`${toLabel} already has ${v.name}. Replace it with this one?`)) return
+        await api.moveEnv(from, to, v.name, true)
+      }
       await done()
     } catch (e) {
       setError(errMsg(e))
@@ -241,9 +265,22 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
                 {own.has(v.name) && ' · overridden in this session'}
               </span>
               {!own.has(v.name) && (
-                <button className="btn-sm" onClick={() => setForm({ name: v.name })}>
-                  Override
-                </button>
+                <span className="env-actions">
+                  <button className="btn-sm" onClick={() => setForm({ name: v.name })}>
+                    Override
+                  </button>
+                  {CAN_MOVE && (
+                    <button
+                      className="btn-sm"
+                      title={`Move it from ${inherited.label} to this session only`}
+                      onClick={() =>
+                        move(inherited.scope, scope, 'this session', v, `\n\nThe other sessions in ${inherited.label} stop receiving it.`)
+                      }
+                    >
+                      Move here
+                    </button>
+                  )}
+                </span>
               )}
             </li>
           ))}
@@ -265,6 +302,26 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
               <button className="btn-sm" onClick={() => setForm({ existing: v })}>
                 {v.source.kind === 'plain' ? 'Edit' : 'Replace'}
               </button>
+              {targets.length > 0 && (
+                <select
+                  className="btn-sm env-move"
+                  value=""
+                  title="Move this variable"
+                  onChange={(e) => {
+                    const t = targets[Number(e.target.value)]
+                    if (!t) return
+                    const warn = scope.kind === 'session' ? '\n\nEvery session in that folder will receive it.' : ''
+                    move(scope, t.scope, t.label, v, warn)
+                  }}
+                >
+                  <option value="">Move to…</option>
+                  {targets.map((t, i) => (
+                    <option key={`${t.scope.kind}:${t.scope.id}`} value={i}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button className="btn-sm danger" onClick={() => remove(v)}>
                 Delete
               </button>

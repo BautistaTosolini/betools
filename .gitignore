@@ -4,3 +4,5 @@ dist/
 web-dist/
 web/master.key
 *.tar
+test-results/
+playwright-report/

@@ -13,8 +13,12 @@ export class TabTitles {
 
   constructor(private readonly onChange: (id: string, title: string | null) => void) {}
 
+  private readonly polling = new Set<string>()
+
   watch(id: string): void {
-    if (this.titles.has(id)) return
+    // Se controla por el polling y no por el mapa: un set() antes de watch() llena el mapa y dejaba el id sin seguir.
+    if (this.polling.has(id)) return
+    this.polling.add(id)
     this.titles.set(id, read(id))
     // Polling: el archivo puede no existir hasta que Claude nombre la sesión.
     watchFile(fileFor(id), { interval: 1500 }, () => {
@@ -27,6 +31,7 @@ export class TabTitles {
 
   unwatch(id: string): void {
     unwatchFile(fileFor(id))
+    this.polling.delete(id)
     this.titles.delete(id)
   }
 
@@ -42,6 +47,7 @@ export class TabTitles {
     } else {
       rmSync(fileFor(id), { force: true })
     }
+    if ((this.titles.get(id) ?? null) === (t || null)) return
     this.titles.set(id, t || null)
     this.onChange(id, t || null)
   }

@@ -38,7 +38,22 @@ export function TerminalView({ id, visible, active = visible }: Props) {
     term.open(containerRef.current!)
     termRef.current = { term, fit }
 
-    // Ctrl+Shift+C / Ctrl+Shift+V para copiar y pegar; el resto de las teclas va a Claude.
+    // Copia pedida por el programa con OSC 52 ("ESC ] 52 ; c ; <base64>"): Claude Code la usa al copiar una
+    // selección hecha con el mouse en su pantalla completa. xterm.js no la implementa por su cuenta.
+    term.parser.registerOscHandler(52, (data) => {
+      const b64 = data.slice(data.indexOf(';') + 1)
+      if (!b64 || b64 === '?') return true
+      try {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+        void api.writeClipboard(new TextDecoder().decode(bytes))
+      } catch {
+        // base64 inválido: se ignora
+      }
+      return true
+    })
+
+    // Copiar: Ctrl+Shift+C o clic derecho con texto seleccionado. Pegar: Ctrl+Shift+V. Ctrl+C va siempre al
+    // proceso (interrumpir), aunque haya selección. El resto de las teclas va al proceso.
     term.attachCustomKeyEventHandler((e) => {
       // Salto de línea en el prompt de Claude: la terminal no distingue Ctrl/Shift+Enter de Enter
       // (los tres mandan "\r" = enviar). Se manda "\n" (Ctrl+J), que Claude Code toma como nueva línea.
@@ -62,6 +77,15 @@ export function TerminalView({ id, visible, active = visible }: Props) {
       }
       return true
     })
+
+    const onContext = (ev: MouseEvent) => {
+      if (!term.hasSelection()) return
+      ev.preventDefault()
+      void api.writeClipboard(term.getSelection())
+      term.clearSelection()
+    }
+    containerRef.current!.addEventListener('contextmenu', onContext)
+    const container = containerRef.current!
 
     const unregister = registerTerm(id, term)
     const unsub = subscribe(
@@ -91,6 +115,7 @@ export function TerminalView({ id, visible, active = visible }: Props) {
     ro.observe(containerRef.current!)
 
     return () => {
+      container.removeEventListener('contextmenu', onContext)
       cancelAnimationFrame(raf)
       ro.disconnect()
       unsub()

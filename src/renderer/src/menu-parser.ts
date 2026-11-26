@@ -42,13 +42,15 @@ export interface Menu {
 
 const RULE = /^\s*[─━═]{8,}/
 const HINT = /(Enter to (select|confirm|submit|continue)|Esc to (cancel|exit|go back)|↑\/↓|to navigate)/i
-const OPTION = /^(\s*)(?:([❯›>])\s*)?(?:\[([ x✓✔])\]\s*)?(\d{1,2})[.)]\s+(.*\S)\s*$/
+// "❯ 1. texto", con la casilla de selección múltiple antes ("[x] 1.") o después ("1. [x]") del número.
+const OPTION = /^(\s*)(?:([❯›>])\s*)?(?:\[([ x✓✔])\]\s*)?(\d{1,2})[.)]\s+(?:\[([ x✓✔])\]\s*)?(.*\S)\s*$/
 // Fin del diálogo hacia arriba: tu prompt, una respuesta o herramienta de Claude, o la marca de "terminó".
 const ABOVE = /^(❯\s(?!\s*\d{1,2}[.)]\s)|[●⏺✻✶✳✢·]\s)/
 
 const BUTTONS = /^(\s*)(❯\s+)?Accept\s+(❯\s+)?Decline\s*$/
 // Campo, relativo a la sangría del diálogo: "❯ * Decision: ▸ not set" (cursor, estado, título, valor).
 const FIELD = /^([❯ ]) ([*✔✓⚠ ]) (\S.*?):(?: (.*))?$/
+const UNNUMBERED = /^\s*❯ \S/
 const CHOICE = /^\s*([❯ ]) ([◯◉☐☒]) (.*)$/
 const EMPTY = /^(not set|Type something…)$/
 
@@ -134,6 +136,14 @@ export function parseMenu(lines: string[]): Menu | null {
   const region = lines.slice(start + 1, hintIdx)
   const f = parseForm(region)
   if (f) return { header: f.header, options: [], hint, form: f.form }
+  // Lo que está arriba de la última línea divisoria que tiene opciones debajo es conversación (p. ej. un mensaje
+  // tuyo que empieza con "1."), no el diálogo.
+  for (let r = region.length - 1; r >= 0; r--) {
+    if (RULE.test(region[r]) && region.slice(r + 1).some((l) => OPTION.test(l))) {
+      region.splice(0, r + 1)
+      break
+    }
+  }
 
   const header: string[] = []
   const options: MenuOption[] = []
@@ -149,10 +159,10 @@ export function parseMenu(lines: string[]): Menu | null {
       optIndent = m[1].length + (m[2] ? 2 : 0)
       options.push({
         n: Number(m[4]),
-        label: m[5],
+        label: m[6],
         detail: [],
         selected: !!m[2],
-        checked: m[3] === undefined ? null : m[3] !== ' '
+        checked: (m[3] ?? m[5]) === undefined ? null : (m[3] ?? m[5]) !== ' '
       })
       continue
     }
@@ -161,6 +171,29 @@ export function parseMenu(lines: string[]): Menu | null {
     // Descripción de la opción anterior: más indentada que el número.
     if (last && line.length - line.trimStart().length > optIndent) last.detail.push(line.trim())
     else if (!options.length) header.push(line.trimEnd())
+  }
+  // Opciones sin número (p. ej. "New MCP server found"): la línea con el cursor "❯" y las vecinas que empiezan en
+  // la misma columna de texto.
+  if (!options.length) {
+    const ci = region.findIndex((l) => UNNUMBERED.test(l))
+    if (ci >= 0) {
+      const col = region[ci].indexOf('❯') + 2
+      const at = (l: string) => l.length > col && !l.slice(0, col).replace('❯', ' ').trim() && l[col] !== ' '
+      let a = ci
+      while (a > 0 && at(region[a - 1])) a--
+      let b = ci
+      while (b + 1 < region.length && at(region[b + 1])) b++
+      if (b > a) {
+        const list = region.slice(a, b + 1)
+        list.forEach((l, i) => options.push({ n: i + 1, label: l.slice(col).trim(), detail: [], selected: l.includes('❯'), checked: null }))
+        // El encabezado es lo que está antes de la lista (sin la conversación, cortada por la línea divisoria).
+        header.length = 0
+        for (const l of region.slice(0, a)) {
+          if (RULE.test(l)) header.length = 0
+          else if (l.trim()) header.push(l.trimEnd())
+        }
+      }
+    }
   }
   if (!options.length && !header.length) return null
   // Se recorta la sangría común del encabezado.

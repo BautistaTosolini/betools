@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, statSync, unwatchFile, watchFile } from 'node:fs'
 import { homedir } from 'node:os'
@@ -16,7 +16,7 @@ import { TabTitles } from './titles'
 import { DailyTokenCounter, StatusLineWatcher } from './usage'
 import { INTERRUPTED } from './transcript-parser'
 import { listSlashCommandsFull } from './slash-commands'
-import { awsProfiles, LocalSecrets, resolveEnv, resolveRef, validateName } from './secrets'
+import { awsProfiles, EnvExistsError, LocalSecrets, moveEnv, resolveEnv, resolveRef, validateName } from './secrets'
 import type { EnvScope, EnvSource, Folder, FolderSuggestion, SavedCommand, Session, SessionMeta, SessionStatus, Settings } from '../shared/types'
 
 // Dos instancias reanudarían las mismas sesiones y escribirían el mismo transcript.
@@ -158,6 +158,16 @@ function envLayers(session: Session): { scope: EnvScope; vars: import('../shared
   if (folder) layers.push({ scope: { kind: 'folder', id: folder.id }, vars: store.envOf({ kind: 'folder', id: folder.id }) })
   layers.push({ scope: { kind: 'session', id: session.id }, vars: store.envOf({ kind: 'session', id: session.id }) })
   return layers
+}
+
+function envMoveTargets(scope: EnvScope): { scope: EnvScope; label: string }[] {
+  if (scope.kind === 'session') {
+    const session = store.find(scope.id)
+    const folder = session && envLayers(session).find((l) => l.scope.kind === 'folder')
+    if (!folder) return []
+    return [{ scope: folder.scope, label: `folder ${store.get().folders.find((f) => f.id === folder.scope.id)?.name ?? ''}` }]
+  }
+  return sessionsUsing(scope).map((s) => ({ scope: { kind: 'session', id: s.id }, label: `session ${s.name}` }))
 }
 
 // Valida una referencia de AWS antes de guardarla (sin shell; perfil y región obligatorios donde aplica).
@@ -443,6 +453,23 @@ function registerIpc(): void {
     store.deleteEnv(scope, name)
     envChanged(scope)
   })
+  // Destinos a los que se puede mover una variable: de una sesión, su carpeta; de una carpeta,
+  // sus sesiones. Solo esos pares, para no mover valores a ámbitos sin relación.
+  ipcMain.handle('env:moveTargets', (_e, scope: EnvScope) => envMoveTargets(scope))
+  ipcMain.handle('env:move', (_e, from: EnvScope, to: EnvScope, name: string, overwrite?: boolean) => {
+    if (!envMoveTargets(from).some((t) => t.scope.kind === to.kind && t.scope.id === to.id)) {
+      throw new Error('The variable can only move between a session and its folder.')
+    }
+    try {
+      moveEnv(store, secrets, from, to, name, !!overwrite)
+    } catch (e) {
+      // El renderer distingue este caso por el prefijo para ofrecer reemplazar.
+      if (e instanceof EnvExistsError) throw new Error(`EXISTS: ${e.message}`)
+      throw e
+    }
+    envChanged(from)
+    envChanged(to)
+  })
   // Prueba una referencia de AWS: solo informa si se pudo leer y el largo, nunca el valor.
   ipcMain.handle('env:test', async (_e, source: EnvSource) => {
     const v = await resolveRef(checkSource(source))
@@ -509,6 +536,8 @@ function registerIpc(): void {
     meta: Object.fromEntries(store.get().sessions.map((s) => [s.id, metaOf(s.id)]))
   }))
 
+  ipcMain.handle('clipboard:read', () => clipboard.readText())
+  ipcMain.handle('clipboard:write', (_e, text: string) => clipboard.writeText(String(text)))
   ipcMain.handle('settings:get', () => settings.get())
   ipcMain.handle('settings:update', (_e, patch: Partial<Settings>) => settings.update(patch))
 

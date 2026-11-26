@@ -298,6 +298,24 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.14.0 — Todo lo de la CLI en Rendered, variables movibles, copiado y pruebas
+
+- Rendered muestra lo que se ve en la CLI mientras Claude trabaja: herramientas con su estado (en curso, ok,
+  error) y su resultado, diffs de las ediciones, razonamiento, avisos (duración del turno, recaps, tareas en
+  segundo plano, errores de hooks), la zona en vivo (actividad, todos, subagentes) y el pie de la caja de prompt.
+- Menús: el de "New MCP server found" (opciones sin número) ahora se puede usar; casillas después del número;
+  un mensaje propio que empieza con "1." ya no aparece como opción.
+- Scroll: al volver a Rendered desde Terminal/CLI queda abajo (ResizeObserver en lugar de MutationObserver).
+- Copiado: en Electron 45 `clipboard` llega undefined al preload, así que copiar/pegar fallaba sin error; ahora
+  va por IPC al proceso principal. Terminal/CLI: Ctrl+Shift+C copia, Ctrl+Shift+V pega, Ctrl+C va siempre al
+  proceso; OSC 52 (el /copy de Claude Code) llega al portapapeles; clic derecho con selección copia.
+- Variables de entorno: se pueden mover entre una sesión y su carpeta en los dos sentidos ("Move to…" y
+  "Move here"); el valor cifrado se re-cifra sin pasar por la interfaz y nunca se pierde si algo falla.
+- Correcciones: importar sesiones sin ~/.claude/projects, prefijo de HOME por ruta (no texto), transcript
+  vaciado, títulos renombrados antes de vigilarlos.
+- Pruebas: Vitest (424, HOME temporal por archivo) y Playwright con Electron y un claude falso (21, sin modelo).
+  `npm test`, `npm run test:e2e`, `npm run test:all`.
+
 ## v0.13.0 — Formularios MCP en Rendered, versión visible y autocompletado más rápido
 
 - Formularios de servidores MCP (elicitation, "MCP server … requests your input"): Rendered los muestra con un

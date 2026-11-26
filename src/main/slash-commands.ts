@@ -178,7 +178,8 @@ function projectClaudeDirs(cwd: string): string[] {
   const home = homedir()
   const out: string[] = []
   let d = cwd
-  while (d.startsWith(home) && d !== home) {
+  // Por carpeta, no por texto: con HOME /home/ana, /home/ana2 no está adentro.
+  while (d.startsWith(home + sep) && d !== home) {
     const c = join(d, '.claude')
     if (existsSync(c) && statSync(c).isDirectory()) out.push(c)
     d = dirname(d)

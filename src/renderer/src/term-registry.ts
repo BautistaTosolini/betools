@@ -116,3 +116,64 @@ export function readActivity(id: string): Activity | null {
   }
   return null
 }
+
+// Todo lo que la CLI dibuja en vivo y no está en el transcript:
+// - lines: lo que hay entre la línea de actividad y la caja del prompt (lista de tareas, subagentes, tareas en
+//   segundo plano, progreso de herramientas), sin el tip ni los mensajes encolados.
+// - footer: la barra de estado debajo del prompt (modo de permisos, tareas en segundo plano, avisos).
+export interface Live {
+  lines: string[]
+  footer: string[]
+}
+
+const ACTIVITY = /^([^\s\w❯⎿─│])\s+(\S[^(]*?…)\s*(?:\((.*)\))?\s*$/
+
+export function readLive(id: string): Live | null {
+  const lines = screenLines(id)
+  let p = -1
+  for (let i = lines.length - 1; i > 0; i--) {
+    if (lines[i].startsWith('❯') && RULE.test(lines[i - 1])) {
+      p = i
+      break
+    }
+  }
+  if (p < 0) return null
+  // Barra de estado: después de la línea que cierra la caja del prompt.
+  let close = p + 1
+  while (close < lines.length && !RULE.test(lines[close])) close++
+  const footer = lines
+    .slice(close + 1)
+    .map((l) => l.trim())
+    .filter((l) => l && !/^\? for shortcuts$/.test(l))
+  // Zona en vivo: desde la línea de actividad hasta la caja del prompt.
+  let a = -1
+  for (let i = p - 2; i >= 0; i--) {
+    if (ACTIVITY.test(lines[i])) {
+      a = i
+      break
+    }
+  }
+  const out: string[] = []
+  if (a >= 0) {
+    const region = lines.slice(a + 1, p - 1)
+    for (let i = 0; i < region.length; i++) {
+      const l = region[i]
+      if (/^\s*⎿\s+Tip:/.test(l)) continue
+      // Mensaje encolado: "❯ texto" (más líneas) seguido de "⎿ Queued"; ya se muestra aparte.
+      if (l.startsWith('❯')) {
+        let j = i + 1
+        while (j < region.length && !/^\s*⎿\s+Queued\b/.test(region[j]) && !region[j].startsWith('❯')) j++
+        if (j < region.length && /^\s*⎿\s+Queued\b/.test(region[j])) {
+          i = j
+          continue
+        }
+      }
+      out.push(l.trimEnd())
+    }
+    while (out.length && !out[0].trim()) out.shift()
+    while (out.length && !out[out.length - 1].trim()) out.pop()
+    const pad = Math.min(...out.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length), 99)
+    if (pad && pad < 99) for (let i = 0; i < out.length; i++) out[i] = out[i].slice(pad)
+  }
+  return { lines: out, footer }
+}

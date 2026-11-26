@@ -15,18 +15,20 @@ interface Props {
 const AUTO_RESTART = !!(window.clawhip as { autoRestart?: boolean }).autoRestart
 
 export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
-  const [inherited, setInherited] = useState<{ label: string; vars: EnvVarMeta[] } | undefined>()
+  const [inherited, setInherited] = useState<{ scope: EnvScope; label: string; vars: EnvVarMeta[] } | undefined>()
   const [dirty, setDirty] = useState(false)
   const [running, setRunning] = useState(false)
+  // Sube con cada cambio: mover una variable cambia también la lista heredada de la carpeta.
+  const [rev, setRev] = useState(0)
 
   useEffect(() => {
     if (!sessionId) return
     window.clawhip.envLayers(sessionId).then((layers) => {
       const folder = layers.find((l) => l.scope.kind === 'folder')
-      setInherited(folder ? { label: folder.label, vars: folder.vars } : undefined)
+      setInherited(folder ? { scope: folder.scope, label: folder.label, vars: folder.vars } : undefined)
     })
     window.clawhip.isRunning(sessionId).then(setRunning)
-  }, [sessionId])
+  }, [sessionId, rev])
 
   const restart = async () => {
     if (!sessionId) return
@@ -45,7 +47,10 @@ export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
           delete them. Claude is told to use them by name only, and commands that dump the environment (env, printenv…) are
           blocked, but that does not stop a specific command from printing them.
         </p>
-        <EnvEditor scope={scope} inherited={inherited} onChange={() => setDirty(true)} />
+        <EnvEditor scope={scope} inherited={inherited} onChange={() => {
+            setDirty(true)
+            setRev((r) => r + 1)
+          }} />
         {dirty && AUTO_RESTART && (
           <div className="env-apply">
             {sessionId

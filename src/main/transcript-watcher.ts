@@ -72,12 +72,15 @@ export class TranscriptWatcher {
       w.parser = new TranscriptParser()
       reset = true
     }
-    if (size === w.offset) return
+    if (size === w.offset) {
+      // Truncado a 0: la conversación quedó vacía y hay que avisarlo (si no, la UI conserva lo viejo).
+      if (reset) this.onConversation(id, 0, [])
+      return
+    }
 
     let changed = false
     const items = w.parser.items
     const countBefore = items.length
-    const lastBefore = items[countBefore - 1]
     const titleBefore = w.parser.title()
     const modelBefore = w.parser.model()
     const fd = openSync(w.file, 'r')
@@ -97,8 +100,9 @@ export class TranscriptWatcher {
     if (reset) {
       this.onConversation(id, 0, now)
     } else {
-      // El último ítem pudo extenderse (otro bloque de la misma respuesta): se reenvía desde ahí.
-      const start = countBefore > 0 && now[countBefore - 1] !== lastBefore ? countBefore - 1 : countBefore
+      // Se reenvía desde el primer ítem tocado (un bloque más de la misma respuesta, el resultado de una
+      // herramienta) o desde los nuevos.
+      const start = Math.min(w.parser.takeChangedFrom(), countBefore)
       if (now.length > start) this.onConversation(id, start, now.slice(start))
     }
     if (w.parser.title() !== titleBefore) this.onTitle(id, w.parser.title())

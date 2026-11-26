@@ -439,6 +439,7 @@ export function App() {
                 </div>
               </div>
               <Kebab
+                title="Session actions"
                 items={[
                   {
                     label: 'Environment variables…',
