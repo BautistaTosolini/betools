@@ -298,6 +298,23 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.15.0 — Paneles de comandos en Rendered, respuestas escritas y edición de Markdown
+
+- Paneles de comandos con interfaz (/usage, /status, /config, /model, /mcp, /hooks, /memory, /permissions,
+  /plugin, /skills, /help, /theme, /resume, /export, /tasks y rewind): Rendered los dibuja con sus colores. Clic
+  en una fila mueve el cursor, doble clic la elige, clic en una pestaña la cambia; el teclado va al panel
+  (también los buscadores) y cada atajo de la línea de ayuda tiene su botón (panel-nav.ts, TuiPanel.tsx).
+- AskUserQuestion: se ven todas las opciones (antes solo "Chat about this", por la línea divisoria). Clic en
+  "Type something." ya no rechaza la pregunta: lleva el cursor ahí y lo escrito en la caja es la respuesta.
+- Permisos: lo escrito en la caja responde "No" con esa indicación (Tab de la CLI); nunca aprueba por error.
+  Los diálogos sin respuesta escrita no mandan el texto y lo avisan.
+- Shift+Tab y clic en el modo del pie cambian el modo de permisos; Esc Esc con la caja vacía abre el rewind.
+- Visor de Markdown: botón Edit con la fuente a la izquierda y la vista previa en vivo a la derecha; Ctrl+S
+  guarda. Escritura atómica que conserva permisos y symlinks. Si el archivo cambió en disco mientras se
+  editaba (p. ej. lo editó Claude), no se pisa: aviso con "Load the disk version" o "Keep mine". Lo escrito
+  sin guardar sobrevive a cambiar de sesión (src/main/docs.ts, canal doc:write).
+- Pruebas: Vitest 467 (pantallas reales de Claude Code 2.1.332 como fixtures) y Playwright 29.
+
 ## v0.14.0 — Todo lo de la CLI en Rendered, variables movibles, copiado y pruebas
 
 - Rendered muestra lo que se ve en la CLI mientras Claude trabaja: herramientas con su estado (en curso, ok,
