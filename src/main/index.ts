@@ -17,6 +17,7 @@ import { DailyTokenCounter, StatusLineWatcher } from './usage'
 import { INTERRUPTED } from './transcript-parser'
 import { listSlashCommandsFull } from './slash-commands'
 import { awsProfiles, EnvExistsError, LocalSecrets, moveEnv, resolveEnv, resolveRef, validateName } from './secrets'
+import { readDoc, writeDoc } from './docs'
 import type { EnvScope, EnvSource, Folder, FolderSuggestion, SavedCommand, Session, SessionMeta, SessionStatus, Settings } from '../shared/types'
 
 // Dos instancias reanudarían las mismas sesiones y escribirían el mismo transcript.
@@ -102,17 +103,7 @@ function envChanged(scope: EnvScope): void {
 
 // Visor de documentos: solo Markdown, hasta 5 MB. Cada documento abierto se vigila (polling) y se
 // reenvía al renderer cuando cambia, por ejemplo si Claude lo edita.
-const DOC_EXTS = new Set(['.md', '.markdown', '.mdx'])
-const DOC_MAX = 5 * 1024 * 1024
 const docWatch = new Map<string, number>()
-
-function readDoc(path: string): { text: string; mtime: number } {
-  if (!DOC_EXTS.has(extname(path).toLowerCase())) throw new Error('Only Markdown files can be opened in betools.')
-  const st = statSync(path)
-  if (!st.isFile()) throw new Error(`Not a file: ${path}`)
-  if (st.size > DOC_MAX) throw new Error('The file is too large to preview (over 5 MB).')
-  return { text: readFileSync(path, 'utf8'), mtime: st.mtimeMs }
-}
 
 function watchDoc(path: string): void {
   const n = docWatch.get(path) ?? 0
@@ -546,6 +537,9 @@ function registerIpc(): void {
     return session ? listSlashCommandsFull(session.cwd, !!quick) : []
   })
   ipcMain.handle('doc:read', (_e, path: string) => readDoc(path))
+  ipcMain.handle('doc:write', (_e, path: string, text: string, mtime: number | null) =>
+    writeDoc(String(path), String(text), typeof mtime === 'number' ? mtime : null)
+  )
   ipcMain.handle('doc:watch', (_e, path: string) => watchDoc(path))
   ipcMain.handle('doc:unwatch', (_e, path: string) => unwatchDoc(path))
 

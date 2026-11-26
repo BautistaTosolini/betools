@@ -87,6 +87,10 @@ const api = {
   readDoc: (path: string): Promise<{ text: string; mtime: number }> => ipcRenderer.invoke('doc:read', path),
   watchDoc: (path: string): Promise<void> => ipcRenderer.invoke('doc:watch', path),
   unwatchDoc: (path: string): Promise<void> => ipcRenderer.invoke('doc:unwatch', path),
+  // Guarda un .md editado en el visor. mtime = versión que se editaba (null = pisar); si cambió en disco, el
+  // error empieza con CONFLICT:.
+  writeDoc: (path: string, text: string, mtime: number | null): Promise<{ text: string; mtime: number }> =>
+    ipcRenderer.invoke('doc:write', path, text, mtime),
   onDocChanged: (cb: (path: string, doc: { text: string; mtime: number } | null) => void) => on('doc:changed', cb),
 
   // Zoom de toda la ventana (el del chat se hace en el renderer).
