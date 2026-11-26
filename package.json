@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test -c test/e2e/playwright.config.ts",
-    "test:e2e:tauri": "npm run build:tauri-renderer && cargo build --release -p betools-desktop && node --test test/e2e-tauri/app.spec.ts",
+    "test:e2e:tauri": "npm run build:tauri-renderer && cargo build --release -p betools-desktop --features custom-protocol && node --test test/e2e-tauri/app.spec.ts",
     "test:all": "npm run typecheck && npm test && npm run test:e2e",
     "dev:tauri-renderer": "vite -c vite.tauri.config.ts",
     "build:tauri-renderer": "vite build -c vite.tauri.config.ts",

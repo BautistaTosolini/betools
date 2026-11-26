@@ -90,8 +90,12 @@ fn create_window(app: &tauri::App, args: &Args, host: &Arc<TauriHost>) -> tauri:
             let handle = handle.clone();
             move |url| {
                 // La ventana nunca navega fuera de la app (p. ej. un link en la vista Rendered): se abre afuera.
+                // Sin custom-protocol (cargo build sin `tauri build`) la interfaz sale del devUrl: es la propia app,
+                // no un link externo. Antes se miraba debug_assertions y un build release abría el navegador.
                 let internal = url.scheme() == "tauri"
-                    || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+                    || (!cfg!(feature = "custom-protocol")
+                        && url.host_str() == Some("localhost")
+                        && url.port() == Some(1420))
                     || url.as_str() == "about:blank";
                 if !internal && is_external(url) {
                     let _ = handle.opener().open_url(url.as_str(), None::<&str>);

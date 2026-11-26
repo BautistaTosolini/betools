@@ -17,11 +17,25 @@ const tauriCsp = (): Plugin => ({
     )
 })
 
+// Ajustes de aspecto solo para WebKitGTK (src-tauri/webview.css). Va al final del <body> para ganar en la cascada a
+// los estilos de la interfaz, y como <style> en línea: el CSP de index.html ya permite `style-src 'unsafe-inline'`.
+const webviewCss = (): Plugin => ({
+  name: 'tauri-webview-css',
+  transformIndexHtml: () => [
+    {
+      tag: 'style',
+      attrs: { 'data-webview': 'webkitgtk' },
+      children: readFileSync(new URL('./src-tauri/webview.css', import.meta.url), 'utf8'),
+      injectTo: 'body'
+    }
+  ]
+})
+
 export default defineConfig({
   root: fileURLToPath(new URL('./src/renderer', import.meta.url)),
   // Rutas relativas: la app carga desde tauri://localhost, pero así también sirve desde cualquier base.
   base: './',
-  plugins: [react(), tauriCsp()],
+  plugins: [react(), tauriCsp(), webviewCss()],
   define: { __APP_VERSION__: JSON.stringify(version) },
   clearScreen: false,
   server: { port: 1420, strictPort: true, host: 'localhost' },
