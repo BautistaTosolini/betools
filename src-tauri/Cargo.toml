@@ -1,0 +1,31 @@
+[package]
+name = "betools-desktop"
+version.workspace = true
+edition.workspace = true
+description = "Claude Code sessions in one window"
+build = "build.rs"
+
+[[bin]]
+name = "betools"
+path = "src/main.rs"
+
+[features]
+# Lo activa `tauri build`: carga la interfaz embebida en lugar de devUrl.
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+betools-app = { path = "../crates/app" }
+betools-desktop-core = { path = "core" }
+tauri = { version = "2", features = ["tray-icon", "image-png", "devtools"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde_json = "1"
+# wayland-data-control: copiar/pegar también en Wayland sin ventana con foco.
+arboard = { version = "3", features = ["wayland-data-control"] }
+# notify-rust directo (y no el plugin): el plugin de escritorio no da urgencia ni clic en la notificación.
+notify-rust = "4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+signal-hook = "0.3"

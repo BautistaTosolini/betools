@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "betools",
+  "mainBinaryName": "betools",
+  "version": "../package.json",
+  "identifier": "local.betools.app",
+  "build": {
+    "beforeDevCommand": "npm run dev:tauri-renderer",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build:tauri-renderer",
+    "frontendDist": "../out/tauri"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb"],
+    "icon": ["../resources/icon-512.png"],
+    "category": "DeveloperTool",
+    "shortDescription": "Claude Code sessions in one window",
+    "longDescription": "Claude Code sessions in one window",
+    "publisher": "betools",
+    "resources": { "../resources/icon.png": "icon.png" }
+  }
+}

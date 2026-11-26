@@ -1,0 +1,12 @@
+[package]
+name = "betools-desktop-core"
+version.workspace = true
+edition.workspace = true
+description = "Lógica de la app de escritorio que no depende de GTK: argumentos, instancia única e importación de localStorage"
+
+[dependencies]
+dirs = "6"
+# preserve_order: igual que el resto de crates, para que el JSON mantenga el orden de claves.
+serde_json = { version = "1", features = ["preserve_order"] }
+rusty-leveldb = "4"
+tempfile = "3"
