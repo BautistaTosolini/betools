@@ -1,0 +1,19 @@
+[package]
+name = "betools-transcripts"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+betools-types = { path = "../types" }
+chrono = "0.4"
+dirs = "6"
+indexmap = "2"
+notify = "8"
+regex = "1"
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+tempfile = "3"
+chrono = "0.4"
+dirs = "6"

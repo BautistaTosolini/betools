@@ -1,0 +1,13 @@
+[package]
+name = "betools-pty"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+betools-types = { path = "../types" }
+portable-pty = "0.9"
+serde_json = { version = "1", features = ["preserve_order"] }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"

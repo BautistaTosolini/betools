@@ -1,0 +1,22 @@
+[package]
+name = "betools-app"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1"
+betools-types = { path = "../types" }
+betools-pty = { path = "../pty" }
+betools-transcripts = { path = "../transcripts" }
+betools-store = { path = "../store" }
+betools-secrets = { path = "../secrets" }
+chrono = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+# preserve_order: el orden de claves de las respuestas es el de index.ts.
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["rt", "time", "process", "io-util"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

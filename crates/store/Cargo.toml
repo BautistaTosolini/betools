@@ -1,0 +1,15 @@
+[package]
+name = "betools-store"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+betools-types = { path = "../types" }
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+# preserve_order: el orden de claves de openers.json y de installed_plugins.json se respeta como en JS.
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
