@@ -2,7 +2,7 @@
 //! src/main/index.ts, con los mismos nombres, orden de argumentos y JSON de respuesta.
 
 use crate::app::{block_on, App, Inner};
-use crate::docs::read_doc;
+use crate::docs::{read_doc, write_doc};
 use crate::util::{clean_extra, js_string, js_trim, lock};
 use betools_pty::SHELL_PREFIX;
 use betools_store::{FolderPatch, SettingsPatch};
@@ -24,6 +24,10 @@ pub const INVOKE_CHANNELS: &[&str] = &[
     "clipboard:write", "settings:get", "settings:update", "slash:list", "doc:read", "doc:watch", "doc:unwatch",
     "artifacts:list", "artifacts:open", "artifacts:reveal", "dialog:pickFolder", "shell:run", "folders:setCommands",
 ];
+
+/// Canales que solo existen en la versión Rust (Electron no los tiene). La interfaz comprueba que el método
+/// exista antes de mostrar la función.
+pub const RUST_ONLY_INVOKE_CHANNELS: &[&str] = &["doc:write"];
 
 /// Canales de `ipcMain.on` (sin respuesta).
 pub const SEND_CHANNELS: &[&str] = &["pty:attach", "pty:restart", "pty:input", "pty:resize"];
@@ -70,6 +74,10 @@ impl Args<'_> {
     fn parse<T: DeserializeOwned>(&self, i: usize) -> Result<T, String> {
         serde_json::from_value(self.get(i).cloned().ok_or_else(|| self.bad(i))?).map_err(|_| self.bad(i))
     }
+}
+
+fn arg_f64(a: &Args, i: usize) -> Option<f64> {
+    a.get(i).and_then(Value::as_f64)
 }
 
 fn to<T: serde::Serialize>(v: T) -> R {
@@ -400,6 +408,11 @@ impl Inner {
                 None => Ok(json!([])),
             },
             "doc:read" => read_doc(a.str(0)?),
+            // (path, text, mtime esperado | null)
+            "doc:write" => {
+                let expected = arg_f64(&a, 2);
+                write_doc(a.str(0)?, a.str(1)?, expected)
+            }
             "doc:watch" => {
                 self.docs.watch(&self.host, a.str(0)?);
                 Ok(Value::Null)

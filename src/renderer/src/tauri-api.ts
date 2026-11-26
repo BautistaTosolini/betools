@@ -106,6 +106,8 @@ function install(): void {
     readDoc: (path: string) => call('doc:read', path),
     watchDoc: (path: string) => call('doc:watch', path),
     unwatchDoc: (path: string) => call('doc:unwatch', path),
+    // Solo en la versión Rust: guardar un .md editado en el visor. mtime = versión que se editaba (null = pisar).
+    writeDoc: (path: string, text: string, mtime: number | null) => call<{ text: string; mtime: number }>('doc:write', path, text, mtime),
     onDocChanged: (cb: (path: string, doc: { text: string; mtime: number } | null) => void) => on('doc:changed', cb),
 
     // Zoom de toda la ventana (el del chat se hace en el renderer): zoom del webview.

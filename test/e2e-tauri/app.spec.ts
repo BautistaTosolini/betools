@@ -77,6 +77,8 @@ interface LaunchOpts {
   // Carpeta que contiene el proyecto (path = cwd) con sus variables, y variables propias de la sesión.
   folderEnv?: Record<string, string>
   sessionEnv?: Record<string, string>
+  // Archivos del proyecto que existen antes de abrir la app (nombre relativo al cwd → contenido).
+  files?: Record<string, string>
 }
 
 const plainVars = (vars: Record<string, string>) =>
@@ -91,6 +93,7 @@ async function launch(opts: LaunchOpts = {}): Promise<Ctx> {
   mkdirSync(home, { recursive: true })
   mkdirSync(cwd, { recursive: true })
   mkdirSync(ud, { recursive: true })
+  for (const [name, text] of Object.entries(opts.files ?? {})) writeFileSync(join(cwd, name), text)
   writeFileSync(log, '')
   const id = randomUUID()
   const now = new Date().toISOString()
@@ -585,6 +588,48 @@ describe('Environment variables', () => {
     await p.locator('.env-list li', { hasText: 'E2E_FOLDER' }).locator('select.env-move').selectOption({ label: 'session e2e' })
     await p.locator('.env-list .empty').toBeVisible()
     assert.partialDeepStrictEqual(stored(ctx).sessions[0].env, [{ name: 'E2E_FOLDER' }])
+  })
+})
+
+describe('Markdown viewer: editing (Rust version only)', () => {
+  test('edits with live preview, saves with Ctrl+S and never overwrites a change made on disk', T, async () => {
+    ctx = await launch({ files: { 'README.md': '# Hola\n\nuno\n' } })
+    const p = ctx.page
+    const file = join(ctx.cwd, 'README.md')
+    await p.locator('.artifact-name', { hasText: 'README.md' }).click()
+    await p.locator('.doc h1').toHaveText('Hola')
+
+    await p.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    const editor = p.locator('textarea.doc-editor')
+    await editor.fill('# Chau\n\ndos\n')
+    await p.locator('.doc-split .doc h1').toHaveText('Chau')
+    await p.locator('.doc-state').toHaveText('Unsaved changes')
+    // E2E_SHOTS=<dir> guarda capturas para revisar el aspecto a ojo.
+    if (process.env.E2E_SHOTS) writeFileSync(join(process.env.E2E_SHOTS, 'doc-edit.png'), await p.screenshot())
+    assert.strictEqual(readFileSync(file, 'utf8'), '# Hola\n\nuno\n')
+    await editor.press('Control+s')
+    await poll(() => readFileSync(file, 'utf8')).toBe('# Chau\n\ndos\n')
+    await p.locator('.doc-state').toHaveText('Saved')
+
+    // Claude cambia el archivo mientras hay cambios sin guardar: se avisa y no se pisa.
+    await editor.fill('# Mio\n')
+    writeFileSync(file, '# Claude\n')
+    await p.locator('.doc-conflict').toBeVisible()
+    if (process.env.E2E_SHOTS) writeFileSync(join(process.env.E2E_SHOTS, 'doc-conflict.png'), await p.screenshot())
+    await p.locator('.doc-bar button', { hasText: /^Save$/ }).click()
+    await p.locator('.doc-conflict').toBeVisible()
+    assert.strictEqual(readFileSync(file, 'utf8'), '# Claude\n')
+    await p.locator('.doc-conflict button', { hasText: 'Keep mine' }).click()
+    await p.locator('.doc-bar button', { hasText: /^Save$/ }).click()
+    await poll(() => readFileSync(file, 'utf8')).toBe('# Mio\n')
+
+    // Sin cambios propios, el editor sigue al archivo.
+    writeFileSync(file, '# Otra vez Claude\n')
+    await p.locator('.doc-split .doc h1').toHaveText('Otra vez Claude')
+    await p.locator('.doc-conflict').toHaveCount(0)
+    await p.locator('.doc-bar button', { hasText: /^Done$/ }).click()
+    await p.locator('textarea.doc-editor').toHaveCount(0)
+    await p.locator('.doc h1').toHaveText('Otra vez Claude')
   })
 })
 

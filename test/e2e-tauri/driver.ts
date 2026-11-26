@@ -248,6 +248,11 @@ export class Session {
     this.id = id
   }
 
+  // PNG de la ventana (para revisar a ojo; las pruebas no comparan píxeles).
+  async screenshot(): Promise<Buffer> {
+    return Buffer.from((await this.req('GET', '/screenshot')) as string, 'base64')
+  }
+
   private async req(method: string, path: string, body?: unknown): Promise<unknown> {
     const res = await fetch(`${this.base}/session/${this.id}${path}`, {
       method,

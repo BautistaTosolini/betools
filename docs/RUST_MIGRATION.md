@@ -72,6 +72,12 @@ WebKitGTK no es Chromium. Hay que verificar que xterm.js, fuentes, portapapeles,
 3. **App de escritorio** (`crates/app`, `src-tauri`, `tauri-api.ts`).
 4. **Paridad**: revisión adversaria módulo por módulo (TS contra Rust), e2e portadas a WebDriver con el mismo `fake-claude.mjs`, y medición de tamaño, memoria y arranque contra la versión Electron.
 
+## Funciones solo de la versión Rust
+
+| Función | Detalle |
+|---|---|
+| Editar `.md` en el visor | Botón **Edit**: fuente a la izquierda y vista previa en vivo a la derecha. **Ctrl+S** o **Save** guarda; **Done** sale (pide confirmar si hay cambios sin guardar). Canal `doc:write(path, text, mtime)` en `crates/app/src/docs.rs`: escritura atómica (temporal + rename) que conserva permisos y symlinks. Si el archivo cambió en disco desde que se empezó a editar (p. ej. lo editó Claude), no se pisa: aparece un aviso con **Load the disk version** o **Keep mine**. Sin cambios propios, el editor sigue al archivo. Lo escrito sin guardar sobrevive a cambiar de sesión. En Electron el método no existe y el visor queda de solo lectura. |
+
 ## Criterios de paridad (para reemplazar Electron)
 
 - Todas las pruebas unitarias portadas pasan con `cargo test`; las 463 de Vitest siguen pasando (la interfaz no cambia).

@@ -82,3 +82,12 @@ fn unknown_channels_are_rejected() {
     // Un canal de send no se invoca como handle y al revés.
     assert!(e.invoke("pty:input", vec![json!("a"), json!("b")]).is_err());
 }
+
+#[test]
+fn tauri_api_uses_every_channel_including_rust_only_ones() {
+    use betools_app::RUST_ONLY_INVOKE_CHANNELS;
+    let api = read("src/renderer/src/tauri-api.ts");
+    for ch in INVOKE_CHANNELS.iter().chain(RUST_ONLY_INVOKE_CHANNELS) {
+        assert!(api.contains(&format!("'{ch}'")), "{ch} no está en tauri-api.ts");
+    }
+}

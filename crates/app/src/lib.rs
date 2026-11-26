@@ -9,5 +9,5 @@ mod host;
 mod util;
 
 pub use app::{App, AppConfig};
-pub use dispatch::{EVENT_CHANNELS, INVOKE_CHANNELS, SEND_CHANNELS};
+pub use dispatch::{EVENT_CHANNELS, INVOKE_CHANNELS, RUST_ONLY_INVOKE_CHANNELS, SEND_CHANNELS};
 pub use host::{Host, Notice, TrayEntry, TrayState};
