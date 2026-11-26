@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import type { ConversationItem, SessionStatus, SlashCommand, ToolCall } from '../../../shared/types'
 import { onScreen, screenLines } from '../term-registry'
-import { KEYS, parseMenu, type Form, type Menu } from '../menu-parser'
+import { hintKeys, KEYS, parseDialog, textAnswerKeys, type Dialog, type Form, type Menu } from '../menu-parser'
+import { keyToTerm } from '../panel-nav'
+import { TuiPanel } from './TuiPanel'
 import { useZoom } from '../zoom'
 import { useDraft } from '../drafts'
 import { readActivity, readCliInput, readLive, readQueued, type Activity, type CliInput, type Live } from '../term-registry'
@@ -76,16 +78,17 @@ function sendPrompt(id: string, text: string): void {
   setTimeout(() => api.input(id, '\r'), 120)
 }
 
-// Diálogo que Claude muestra en la terminal (leído de la pantalla), actualizado en cada escritura.
-function useMenu(id: string): Menu | null {
-  const [menu, setMenu] = useState<Menu | null>(null)
+// Diálogo que Claude muestra en la terminal (leído de la pantalla), actualizado en cada escritura: un menú o
+// formulario conocido, o el panel de un comando (/usage, /config…).
+function useDialog(id: string): Dialog | null {
+  const [dialog, setDialog] = useState<Dialog | null>(null)
   useEffect(() => {
     let raf = 0
     const read = () => {
       cancelAnimationFrame(raf)
       raf = requestAnimationFrame(() => {
-        const next = parseMenu(screenLines(id))
-        setMenu((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+        const next = parseDialog(screenLines(id))
+        setDialog((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
       })
     }
     read()
@@ -95,7 +98,7 @@ function useMenu(id: string): Menu | null {
       cancelAnimationFrame(raf)
     }
   }, [id])
-  return menu
+  return dialog
 }
 
 // Encabezado del diálogo: pestañas de AskUserQuestion (☐ Color), líneas de código (comando a aprobar,
@@ -123,22 +126,46 @@ function headerParts(lines: string[]) {
 // Elegir una opción moviendo el cursor con flechas y confirmando, en vez de mandar el número: en algunos
 // menús (p. ej. la opción "Type something" de AskUserQuestion) el número se escribía como texto y se acumulaba.
 // Las teclas van de a una (la TUI no siempre separa varias secuencias llegadas juntas).
+// busyUntil: hasta cuándo hay teclas en camino (más el redibujo), para que lo siguiente parta de la pantalla nueva.
+const busyUntil = new Map<string, number>()
 function sendKeys(id: string, keys: string[], gap = 35): void {
   keys.forEach((k, i) => setTimeout(() => api.input(id, k), i * gap))
+  busyUntil.set(id, Math.max(busyUntil.get(id) ?? 0, Date.now() + keys.length * gap + 150))
 }
 
-export function chooseOption(id: string, menu: Menu, n: number): boolean {
+// 'text': era la opción de escribir ("Type something."): solo se lleva el cursor ahí, sin Enter (con Enter y vacía,
+// Claude Code rechaza la pregunta), y la respuesta se escribe en la caja.
+export function chooseOption(id: string, menu: Menu, n: number): boolean | 'text' {
   const target = menu.options.findIndex((o) => o.n === n)
   const cur = menu.options.findIndex((o) => o.selected)
   if (target < 0) return false
   const opt = menu.options[target]
+  const isText = menu.input?.kind === 'type' && menu.input.n === n
   const confirm = opt.checked !== null ? KEYS.space : KEYS.enter
   if (cur < 0) {
+    if (isText) return 'text'
     sendKeys(id, [String(n)])
     return true
   }
   const d = target - cur
-  sendKeys(id, [...Array(Math.abs(d)).fill(d > 0 ? KEYS.down : KEYS.up), confirm])
+  const moves = Array(Math.abs(d)).fill(d > 0 ? KEYS.down : KEYS.up)
+  sendKeys(id, isText ? moves : [...moves, confirm])
+  return isText ? 'text' : true
+}
+
+// Respuesta escrita: en la opción de texto (o como "No, and tell Claude…" en un permiso). false si el diálogo no
+// acepta texto: así nunca se confirma otra opción por accidente.
+async function answerWithText(id: string, text: string): Promise<boolean> {
+  // Si recién se eligió algo (p. ej. con el número), se espera a que la pantalla muestre dónde quedó el cursor.
+  const wait = (busyUntil.get(id) ?? 0) - Date.now()
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+  const d = parseDialog(screenLines(id))
+  const keys = d?.kind === 'menu' ? textAnswerKeys(d.menu, text) : null
+  if (!keys) return false
+  // El texto va de una vez; el Enter, con un respiro para que la TUI lo tome.
+  const head = keys.slice(0, -1)
+  sendKeys(id, head, 60)
+  setTimeout(() => api.input(id, KEYS.enter), head.length * 60 + 150)
   return true
 }
 
@@ -273,17 +300,26 @@ function FormPanel({ id, menu, form }: { id: string; menu: Menu; form: Form }) {
   )
 }
 
-function MenuPanel({ id, menu }: { id: string; menu: Menu }) {
+function MenuPanel({ id, menu, onText }: { id: string; menu: Menu; onText(): void }) {
   if (menu.form) return <FormPanel id={id} menu={menu} form={menu.form} />
-  return <ChoicePanel id={id} menu={menu} />
+  return <ChoicePanel id={id} menu={menu} onText={onText} />
 }
 
-function ChoicePanel({ id, menu }: { id: string; menu: Menu }) {
+function ChoicePanel({ id, menu, onText }: { id: string; menu: Menu; onText(): void }) {
   const key = (k: string) => api.input(id, k)
   const [locked, take] = useMenuLock(menu)
   const choose = (n: number) => {
+    if (menu.input?.kind === 'type' && menu.input.n === n) {
+      // Sin bloquear: solo mueve el cursor; la respuesta se escribe en la caja.
+      chooseOption(id, menu, n)
+      onText()
+      return
+    }
     if (take()) chooseOption(id, menu, n)
   }
+  // Atajos de la línea de ayuda ("s to use this session only", "Tab to amend") y de líneas como
+  // "◐ Medium effort (default) ←/→ to adjust" (/model).
+  const extra = hintKeys([menu.hint, ...menu.header.filter((l) => l.includes('←/→')).map((l) => l.trim().replace(/^.*?(←\/→ to)/, '$1'))].join(' · '))
   const { tabs, rest, qi } = headerParts(menu.header)
   const multiTab = tabs.length > 1
   return (
@@ -324,7 +360,11 @@ function ChoicePanel({ id, menu }: { id: string; menu: Menu }) {
                 <span>{o.label}</span>
                 {o.detail.length > 0 && <small>{o.detail.join(' · ')}</small>}
               </span>
-              {o.selected && <span className="menu-enter">↵</span>}
+              {menu.input?.kind === 'type' && menu.input.n === o.n ? (
+                <span className="menu-enter">write below ✎</span>
+              ) : (
+                o.selected && <span className="menu-enter">↵</span>
+              )}
             </button>
           ))}
         </div>
@@ -341,9 +381,13 @@ function ChoicePanel({ id, menu }: { id: string; menu: Menu }) {
         {menu.options.some((o) => o.checked !== null) && (
           <button className="key" onClick={() => key(KEYS.space)} title="Toggle">Space</button>
         )}
-        {/Tab to/i.test(menu.hint) && (
-          <button className="key" onClick={() => key(KEYS.tab)} title={menu.hint}>Tab</button>
-        )}
+        {extra
+          .filter((k) => !(k.label === 'Space' && menu.options.some((o) => o.checked !== null)))
+          .map((k) => (
+            <button key={k.label + k.title} className="key wide" title={k.title} onClick={() => k.keys.forEach((s) => key(s))}>
+              <kbd>{k.label}</kbd> {k.title}
+            </button>
+          ))}
         <span style={{ flex: 1 }} />
         <button className="btn-sm ghost" onClick={() => key(KEYS.esc)}>Cancel</button>
         <button className="btn-sm primary" onClick={() => key(KEYS.enter)}>Confirm</button>
@@ -450,7 +494,15 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
     requestAnimationFrame(() => ref.current?.focus())
   }
   const ref = useRef<HTMLTextAreaElement>(null)
-  const menu = useMenu(id)
+  const dialog = useDialog(id)
+  const menu = dialog?.kind === 'menu' ? dialog.menu : null
+  const panel = dialog?.kind === 'panel' ? dialog.panel : null
+  // Menú sin respuesta escrita (p. ej. un permiso viejo o /model): la caja no manda texto, para no confirmar
+  // una opción por accidente.
+  const noText = !!menu && !menu.form && !menu.input
+  const [flash, setFlash] = useState<string | null>(null)
+  useEffect(() => setFlash(null), [!!menu, !!panel])
+  const lastEsc = useRef(0)
   const working = status === 'working'
   const off = status === 'stopped' || status === 'exited'
 
@@ -464,14 +516,14 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
 
   // Al aparecer un menú, el foco va a la caja para poder usar el teclado (números, flechas, Enter, Esc).
   useEffect(() => {
-    if (menu) ref.current?.focus()
-  }, [!!menu])
+    if (menu || panel) ref.current?.focus()
+  }, [!!menu, !!panel])
 
   // Esc detiene a Claude (o cierra el menú) desde cualquier parte de Rendered, no solo con el foco en la caja.
   // Ctrl+C queda para copiar. Se ignora si el foco está en otro campo o diálogo, o si el autocompletado está abierto
   // (ahí Esc lo cierra).
-  const keys = useRef({ working, menu: !!menu, slash: showSlash })
-  keys.current = { working, menu: !!menu, slash: showSlash }
+  const keys = useRef({ working, menu: !!(menu || panel), slash: showSlash })
+  keys.current = { working, menu: !!(menu || panel), slash: showSlash }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey || e.repeat) return
@@ -491,17 +543,26 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
   const send = () => {
     const t = text.trim()
     if (!t || off) return
-    // Con un menú abierto (p. ej. "Type something" o "tell Claude what to do"), el texto va como tecleo.
-    if (menu) {
+    if (menu?.form) {
+      // Formulario MCP: el texto va al campo de texto enfocado.
       api.input(id, t)
       setTimeout(() => api.input(id, '\r'), 120)
+    } else if (menu) {
+      // Pregunta con "Type something." o permiso ("No, and tell Claude what to do differently"): el texto va ahí.
+      if (!menu.input) {
+        setFlash('This dialog has no text answer: choose an option above.')
+        return
+      }
+      void answerWithText(id, t)
     } else sendPrompt(id, t)
     setText('')
   }
 
   return (
-    <div className={`composer ${menu ? 'with-menu' : ''}`}>
-      {menu && <MenuPanel id={id} menu={menu} />}
+    <div className={`composer ${menu || panel ? 'with-menu' : ''}`}>
+      {menu && <MenuPanel id={id} menu={menu} onText={() => requestAnimationFrame(() => ref.current?.focus())} />}
+      {panel && <TuiPanel id={id} panel={panel} onFocusKeys={() => ref.current?.focus()} />}
+      {flash && <div className="composer-flash">{flash}</div>}
       {showSlash && (
         <div className="slash-pop" ref={listRef}>
           {commands === null && <div className="slash-empty">Loading commands…</div>}
@@ -523,7 +584,7 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
           ))}
         </div>
       )}
-      {!menu && cli?.text && (
+      {!menu && !panel && cli?.text && (
         <div className="cli-pending">
           <span className="cli-pending-label">In the CLI prompt</span>
           <span className="cli-pending-text" title={cli.text}>
@@ -547,14 +608,58 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
         placeholder={
           off
             ? 'Session not running.'
-            : menu
-              ? 'Type a number, use the arrows, or write an answer…'
+            : panel
+              ? 'Keys go to the panel: type to search, ↑/↓ to move, Enter to select, Esc to close'
+              : menu?.input?.kind === 'type'
+                ? 'Choose a number, or write your own answer and press Enter…'
+                : menu?.input?.kind === 'amend'
+                  ? 'Choose a number, or write what Claude should do instead (answers No) and press Enter…'
+                  : noText
+                    ? 'Choose an option with a number or the arrows…'
+                    : menu
+                      ? 'Type a number, use the arrows, or write an answer…'
               : working
                 ? 'Claude is working. Your message is queued…'
                 : 'Reply to Claude…  (/ for commands and skills)'
         }
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          if (panel) return
+          setText(e.target.value)
+          setFlash(null)
+        }}
+        onPaste={(e) => {
+          // En un panel lo pegado va directo (p. ej. al buscador).
+          if (!panel) return
+          e.preventDefault()
+          api.input(id, e.clipboardData.getData('text'))
+        }}
         onKeyDown={(e) => {
+          if (panel) {
+            const k = keyToTerm(e)
+            if (k !== null) {
+              e.preventDefault()
+              api.input(id, k)
+            }
+            return
+          }
+          // Shift+Tab cambia el modo de permisos, como en la CLI.
+          if (e.key === 'Tab' && e.shiftKey && !menu) {
+            e.preventDefault()
+            api.input(id, '\x1b[Z')
+            return
+          }
+          // Esc Esc con la caja vacía y Claude quieto: rewind (volver a un mensaje anterior), como en la CLI.
+          if (e.key === 'Escape' && !text && !menu && !working && !showSlash) {
+            const now = Date.now()
+            if (now - lastEsc.current < 600) {
+              e.preventDefault()
+              lastEsc.current = 0
+              api.input(id, KEYS.esc)
+              setTimeout(() => api.input(id, KEYS.esc), 50)
+              return
+            }
+            lastEsc.current = now
+          }
           if (showSlash && matches.length) {
             if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
               e.preventDefault()
@@ -583,6 +688,7 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
               if (!e.repeat) chooseOption(id, menu, Number(e.key))
               return
             }
+            // Tab en un permiso: abre "No/Yes, and tell Claude…" en la opción con el cursor, como en la CLI.
             const k = MENU_KEYS[e.key]
             if (k && !e.ctrlKey && !e.altKey && !(e.key === 'Enter' && e.shiftKey)) {
               e.preventDefault()
@@ -604,7 +710,11 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
       />
       <div className="composer-actions">
         <span className="composer-hint">
-          {menu?.form ? (
+          {panel ? (
+            <>
+              Keys go to the panel · <kbd>Esc</kbd> close
+            </>
+          ) : menu?.form ? (
             <>
               <kbd>↑</kbd><kbd>↓</kbd> field · <kbd>→</kbd> options · <kbd>Space</kbd> pick · <kbd>Esc</kbd> cancel
             </>
@@ -614,7 +724,8 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
             </>
           ) : (
             <>
-              <kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line{working && <> · <kbd>Esc</kbd> stop</>}
+              <kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <kbd>Shift</kbd>+<kbd>Tab</kbd> mode
+              {working ? <> · <kbd>Esc</kbd> stop</> : <> · <kbd>Esc</kbd><kbd>Esc</kbd> rewind</>}
             </>
           )}
         </span>
@@ -627,7 +738,7 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
         <button className="btn-sm ghost" onClick={onOpenCli} title="Open the raw terminal">
           CLI
         </button>
-        <button className="primary btn-sm" disabled={!text.trim() || off} onClick={send}>
+        <button className="primary btn-sm" disabled={!text.trim() || off || !!panel} onClick={send}>
           Send
         </button>
       </div>
@@ -943,7 +1054,23 @@ export function ConversationView({
         </div>
       )}
       {live && live.lines.length > 0 && <pre className="live-pane">{live.lines.join('\n')}</pre>}
-      {live && live.footer.length > 0 && <div className="cli-footer">{live.footer.join('  ·  ')}</div>}
+      {live && live.footer.length > 0 && (
+        <div className="cli-footer">
+          {live.footer.map((f, i) => (
+            <span key={i}>
+              {i > 0 && '  ·  '}
+              {/shift\+tab to cycle|\bmode on\b/i.test(f) ? (
+                // Modo de permisos: clic para pasar al siguiente (Shift+Tab en la CLI).
+                <button className="cli-mode" title="Cycle permission mode (Shift+Tab)" onClick={() => api.input(id, '\x1b[Z')}>
+                  {f}
+                </button>
+              ) : (
+                f
+              )}
+            </span>
+          ))}
+        </div>
+      )}
       <Composer id={id} status={status} onOpenCli={onReply} />
     </div>
   )
