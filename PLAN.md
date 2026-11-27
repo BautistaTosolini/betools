@@ -298,6 +298,11 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.16.1 — Variables con valores largos
+
+- Diálogo de variables: un valor largo (p. ej. un host de RDS) se corta en varias líneas; antes aplastaba la
+  etiqueta "visible" a una letra por línea. Prueba e2e de regresión.
+
 ## v0.16.0 — Edición visual de Markdown
 
 - Visor de Markdown: modo Visual (por defecto) para editar sobre el documento renderizado, como en Notion
