@@ -298,6 +298,16 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.18.1 — Título en claude --resume y confirmaciones propias
+
+- El título de la barra lateral se escribe en el historial de Claude con las mismas líneas que /rename
+  (custom-title y agent-name), así claude --resume muestra el mismo nombre. Se repite al salir Claude. Un
+  /rename hecho en Claude actualiza la barra lateral (resume-title.ts).
+- Confirmaciones con la interfaz de betools en lugar de window.confirm (ConfirmDialog.tsx): encima de otros
+  diálogos, Enter acepta, Esc cancela, botón rojo en las destructivas.
+- "Move to…" y "Close session" nombran la sesión como la barra lateral (ticket y resumen).
+- Pruebas: Vitest 490 y Playwright 44.
+
 ## v0.18.0 — Comandos globales, botón de variables y precedencia visible
 
 - Botón Variables junto a ▶ Commands en la sesión. ▶ Commands aparece en todas las sesiones.
