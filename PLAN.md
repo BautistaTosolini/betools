@@ -298,6 +298,16 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.20.0 — Paneles de Claude Code como interfaz y zoom por defecto
+
+- Los paneles (/usage, /status, /config, /mcp, /hooks, /memory, /permissions, /stats…) se muestran como
+  interfaz: pestañas, buscador, ajustes con On/Off, barras de uso con su reinicio, datos clave/valor y listas
+  con íconos de estado. Clic mueve el cursor y doble clic elige, como antes. "Terminal view" muestra el panel
+  tal como lo dibuja Claude Code (se recuerda). Clasificación en panel-blocks.ts, probada con pantallas reales.
+- La ayuda de teclas que el parser no reconocía ("Esc to close") también da botones.
+- Zoom por defecto: ventana 110 %, chat 90 % (Ctrl+0 vuelve a esos valores). Las capturas del README van al 100 %.
+- Pruebas: Vitest 506 y Playwright 46.
+
 ## v0.19.1 — Autocompletado de / en cualquier parte del mensaje
 
 - El autocompletado de comandos y skills aparece con la palabra "/algo" donde está el cursor, también en medio
