@@ -45,7 +45,7 @@ export function groupSessions(sessions: Session[], folders: Folder[]): Group[] {
 }
 
 // Título "<KEY> [<KEY>…] <resumen>": una o más keys de Jira al principio (la primera es la principal).
-// "SURT-43 SURT-46 deploy codebuild" → { ticket: "SURT-43", tickets: ["SURT-43", "SURT-46"], summary: "deploy codebuild" }
+// "ACME-43 ACME-46 deploy codebuild" → { ticket: "ACME-43", tickets: ["ACME-43", "ACME-46"], summary: "deploy codebuild" }
 // El estándar separa las keys con espacios; también se aceptan ",", "+", "/" y "&" por tolerancia.
 const KEY = '[A-Za-z][A-Za-z0-9]{1,9}-\\d+'
 const TITLE_RE = new RegExp(`^(${KEY}(?:\\s*[,+/&]?\\s*${KEY})*)\\b[\\s:·—,.-]*(.*)$`)
@@ -55,7 +55,7 @@ export function parseTitle(title: string | null | undefined): { ticket: string |
   const m = TITLE_RE.exec(t)
   // Sin key al principio, o con minúsculas que no parecen key ("a-1"): todo es resumen.
   if (!m) return { ticket: null, tickets: [], summary: t }
-  // Las keys se muestran en mayúsculas aunque se hayan escrito en minúsculas ("ve-1526 …").
+  // Las keys se muestran en mayúsculas aunque se hayan escrito en minúsculas ("ops-1526 …").
   const tickets = [...new Set(m[1].split(/[\s,+/&]+/).filter(Boolean).map((k) => k.toUpperCase()))]
   return { ticket: tickets[0], tickets, summary: m[2] || null }
 }

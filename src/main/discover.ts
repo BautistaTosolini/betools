@@ -63,7 +63,7 @@ interface Raw {
 // Lee solo el principio (primer prompt) y el final (cwd actual, título) de cada archivo.
 //
 // El cwd: las primeras líneas guardan el directorio donde empezó la sesión, que puede ya no
-// existir si la carpeta se movió (p. ej. ~/workdir/clients/vemo → ~/workdir/infra/clients/vemo).
+// existir si la carpeta se movió (p. ej. ~/workdir/clients/acme → ~/workdir/infra/clients/acme).
 // Se usa, en orden: el directorio que corresponde a la carpeta de proyecto donde vive el .jsonl
 // (desde donde se lanzó), el mismo deducido de un movimiento de carpeta, y si no, el último y el
 // primer cwd registrados que existan.
@@ -114,7 +114,7 @@ export function discoverSessions(exclude: Set<string>, limit = 300): DiscoveredS
   }
 
   // Carpetas movidas: de sesiones que empezaron en un path que ya no existe y siguieron en otro
-  // con el mismo final (…/clients/vemo → …/infra/clients/vemo) se aprende el cambio de prefijo.
+  // con el mismo final (…/clients/acme → …/infra/clients/acme) se aprende el cambio de prefijo.
   const rewrites = new Map<string, string>()
   for (const r of raws) {
     if (!r.headCwd || !r.tailCwd || r.headCwd === r.tailCwd || isDir(r.headCwd) || !isDir(r.tailCwd)) continue

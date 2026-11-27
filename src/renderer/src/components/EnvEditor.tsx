@@ -119,7 +119,7 @@ function EnvForm({ scope, existing, initialName, onDone, onCancel }: FormProps) 
         <>
           <label>
             Value
-            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="vemo-prd" spellCheck={false} autoFocus={!!existing} />
+            <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="acme-prd" spellCheck={false} autoFocus={!!existing} />
           </label>
           <p className="muted small">Stored as plain text and shown in the UI. Do not use it for secrets.</p>
         </>

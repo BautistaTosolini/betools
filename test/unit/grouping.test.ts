@@ -7,42 +7,42 @@ const session = (id: string, cwd: string): Session => ({ id, name: id, cwd, crea
 
 describe('folders', () => {
   const clients = folder('clients', '/w/clients')
-  const vemo = folder('vemo', '/w/clients/vemo/', ['/w/infra/vemo'])
-  const folders = [clients, vemo]
+  const acme = folder('acme', '/w/clients/acme/', ['/w/infra/acme'])
+  const folders = [clients, acme]
 
   it('picks the folder with the longest matching path, including extra paths', () => {
-    expect(folderFor(session('a', '/w/clients/vemo/api'), folders)?.id).toBe('vemo')
-    expect(folderFor(session('b', '/w/clients/nivii'), folders)?.id).toBe('clients')
-    expect(folderFor(session('c', '/w/infra/vemo/tf'), folders)?.id).toBe('vemo')
+    expect(folderFor(session('a', '/w/clients/acme/api'), folders)?.id).toBe('acme')
+    expect(folderFor(session('b', '/w/clients/globex'), folders)?.id).toBe('clients')
+    expect(folderFor(session('c', '/w/infra/acme/tf'), folders)?.id).toBe('acme')
     expect(folderFor(session('d', '/w/clientsX'), folders)).toBeUndefined()
     expect(folderFor(session('e', '/w/clients'), folders)?.id).toBe('clients')
   })
 
   it('returns the base path used for the relative display', () => {
-    expect(basePathFor('/w/infra/vemo/tf', vemo)).toBe('/w/infra/vemo')
-    expect(basePathFor('/w/clients/vemo', vemo)).toBe('/w/clients/vemo')
-    expect(basePathFor('/other', vemo)).toBeNull()
+    expect(basePathFor('/w/infra/acme/tf', acme)).toBe('/w/infra/acme')
+    expect(basePathFor('/w/clients/acme', acme)).toBe('/w/clients/acme')
+    expect(basePathFor('/other', acme)).toBeNull()
   })
 
   it('groups in folder order and puts loose sessions last, only if any', () => {
-    const groups = groupSessions([session('a', '/w/clients/vemo/x'), session('b', '/tmp'), session('c', '/w/clients/q')], folders)
+    const groups = groupSessions([session('a', '/w/clients/acme/x'), session('b', '/tmp'), session('c', '/w/clients/q')], folders)
     expect(groups.map((g) => [g.folder?.id ?? null, g.sessions.map((s) => s.id)])).toEqual([
       ['clients', ['c']],
-      ['vemo', ['a']],
+      ['acme', ['a']],
       [null, ['b']]
     ])
-    expect(groupSessions([session('a', '/w/clients/x')], folders).map((g) => g.folder?.id)).toEqual(['clients', 'vemo'])
+    expect(groupSessions([session('a', '/w/clients/x')], folders).map((g) => g.folder?.id)).toEqual(['clients', 'acme'])
   })
 })
 
 describe('titles with Jira keys', () => {
   it.each([
-    ['SURT-43 deploy codebuild', 'SURT-43', ['SURT-43'], 'deploy codebuild'],
-    ['SURT-43 SURT-46 deploy codebuild', 'SURT-43', ['SURT-43', 'SURT-46'], 'deploy codebuild'],
-    ['VE-1526, VE-1588: fabric', 'VE-1526', ['VE-1526', 'VE-1588'], 'fabric'],
-    ['ve-1526 conexiones', 'VE-1526', ['VE-1526'], 'conexiones'],
-    ['NIVII-14', 'NIVII-14', ['NIVII-14'], null],
-    ['NIVII-14 NIVII-14 dup', 'NIVII-14', ['NIVII-14'], 'dup']
+    ['ACME-43 deploy codebuild', 'ACME-43', ['ACME-43'], 'deploy codebuild'],
+    ['ACME-43 ACME-46 deploy codebuild', 'ACME-43', ['ACME-43', 'ACME-46'], 'deploy codebuild'],
+    ['OPS-1526, OPS-1588: fabric', 'OPS-1526', ['OPS-1526', 'OPS-1588'], 'fabric'],
+    ['ops-1526 conexiones', 'OPS-1526', ['OPS-1526'], 'conexiones'],
+    ['GLX-14', 'GLX-14', ['GLX-14'], null],
+    ['GLX-14 GLX-14 dup', 'GLX-14', ['GLX-14'], 'dup']
   ])('%s', (title, ticket, tickets, summary) => {
     expect(parseTitle(title)).toEqual({ ticket, tickets, summary })
   })
@@ -54,7 +54,7 @@ describe('titles with Jira keys', () => {
   })
 
   it('falls back to the session name when there is no title', () => {
-    expect(sessionLabel(null, 'VE-1 importar')).toEqual({ ticket: 'VE-1', tickets: ['VE-1'], summary: 'importar', fallback: true })
+    expect(sessionLabel(null, 'OPS-1 importar')).toEqual({ ticket: 'OPS-1', tickets: ['OPS-1'], summary: 'importar', fallback: true })
     expect(sessionLabel('Plataforma de datos', 'x')).toMatchObject({ summary: 'Plataforma de datos', fallback: false })
   })
 })

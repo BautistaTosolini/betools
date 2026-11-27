@@ -530,7 +530,7 @@ test.describe('Environment variables', () => {
   })
 
   test('a long value wraps itself instead of squeezing the storage label', async () => {
-    const host = 'zeroq-prd-cluster.cluster-cxt7lxue0tbf.us-east-2.rds.amazonaws.com.example-very-long-suffix'
+    const host = 'demo-prd-cluster.cluster-abc123def456.us-east-2.rds.amazonaws.com.example-very-long-suffix'
     ctx = await launch({ sessionEnv: { E2E_SHORT: 'x', E2E_HOST: host } })
     await openSessionEnv(ctx.page)
     const row = ctx.page.locator('.env-list:not(.inherited) li', { hasText: 'E2E_HOST' })

@@ -200,9 +200,9 @@ describe('cwd resolution', () => {
   it('moved folder: infers the prefix rewrite from another session (…/clients/x -> …/infra/clients/x)', () => {
     const base = realpathSync(mkdtempSync(join(tmpdir(), 'mv-')))
     const oldRoot = join(base, 'workdir') // ya no existe en su ubicación original
-    const newApp = join(base, 'workdir', 'infra', 'clients', 'vemo')
+    const newApp = join(base, 'workdir', 'infra', 'clients', 'acme')
     mkdirSync(newApp, { recursive: true })
-    const oldApp = join(oldRoot, 'clients', 'vemo')
+    const oldApp = join(oldRoot, 'clients', 'acme')
     // sesión A: empezó en la ruta vieja y siguió en la nueva; vive en la carpeta de proyecto de la ruta VIEJA
     // (oldApp no existe), así que dirCwd no sirve y hay que reescribir
     session(encode(oldApp), 'a', [userMsg('x', oldApp), { type: 'assistant', cwd: newApp, message: { content: 'a' } }])
@@ -221,16 +221,16 @@ describe('cwd resolution', () => {
     // La carpeta de proyecto del .jsonl codifica el path NUEVO (la sesión se lanzó desde allí), pero el
     // primer y el último cwd registrados son rutas internas que ya no existen... y otra sesión enseña el cambio.
     const base = realpathSync(mkdtempSync(join(tmpdir(), 'rw-')))
-    const newApp = join(base, 'infra', 'clients', 'vemo')
+    const newApp = join(base, 'infra', 'clients', 'acme')
     mkdirSync(join(newApp, 'sub'), { recursive: true })
-    const oldApp = join(base, 'clients', 'vemo')
+    const oldApp = join(base, 'clients', 'acme')
     // enseña el cambio: head en ruta vieja (inexistente), tail en ruta nueva (existente)
     session(encode(oldApp), 'teach', [userMsg('x', oldApp), { type: 'assistant', cwd: newApp, message: { content: 'a' } }])
     // sesión objetivo: vive en la carpeta del path nuevo y todos sus cwd son rutas viejas inexistentes
     const oldSub = join(oldApp, 'sub')
     session(encode(newApp), 'target', [userMsg('y', oldApp), { type: 'assistant', cwd: oldSub, message: { content: 'a' } }])
     const r = Object.fromEntries(discoverSessions(new Set()).map((s) => [s.id, s]))
-    // oldApp -> newApp (prefijo común "clients/vemo" de la cola); candidato = newApp/sub no coincide con la
+    // oldApp -> newApp (prefijo común "clients/acme" de la cola); candidato = newApp/sub no coincide con la
     // carpeta de proyecto (encode(newApp)), pero oldApp -> newApp sí
     expect(r.target).toMatchObject({ cwd: newApp, cwdExists: true })
   })

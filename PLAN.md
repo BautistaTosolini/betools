@@ -5,8 +5,8 @@ App de escritorio (Linux) para trabajar con varias sesiones de Claude Code en pa
 ```
 ┌──────────────┬───────────────────────────────┬──────────────────┐
 │ Sesiones     │  Terminal de la sesión         │  Artefactos      │
-│ ● infra-ca   │  (claude CLI real, xterm.js)   │  📄 informe.pdf  │
-│ ○ gatekeeper │                                │  🌐 reporte.html │
+│ ● api-gw     │  (claude CLI real, xterm.js)   │  📄 informe.pdf  │
+│ ○ pipeline   │                                │  🌐 reporte.html │
 │ ● clawhip    │                                │  📝 PLAN.md      │
 │ [+ nueva]    │                                │                  │
 └──────────────┴───────────────────────────────┴──────────────────┘
@@ -40,7 +40,7 @@ Electron main (Node)
 ```json
 {
   "sessions": [
-    { "id": "<uuid de Claude>", "name": "infra-ca", "cwd": "/home/.../infra",
+    { "id": "<uuid de Claude>", "name": "api-gateway", "cwd": "/home/.../infra",
       "createdAt": "...", "lastActiveAt": "...", "order": 0 }
   ]
 }
@@ -169,7 +169,7 @@ clawhip/
 - **Variables por carpeta y por sesión** (la sesión pisa a la carpeta). Tres tipos:
   - *Visible*: texto plano en `sessions.json`, se muestra (AWS_PROFILE, AWS_REGION…).
   - *Local cifrada*: `safeStorage` (GNOME Keyring) en `~/.config/clawhip/secrets.json` (0600). Solo para valores propios; se niega a guardar si el backend es `basic_text`.
-  - *AWS Secrets Manager / SSM*: solo la referencia (perfil, región, id); el valor se lee con el CLI al lanzar y no toca el disco. Botón "Probar" informa solo éxito y largo. Es lo indicado para credenciales de clientes (la política de Craftech no permite guardarlas en el equipo).
+  - *AWS Secrets Manager / SSM*: solo la referencia (perfil, región, id); el valor se lee con el CLI al lanzar y no toca el disco. Botón "Probar" informa solo éxito y largo. Es lo indicado para credenciales de clientes (no deben quedar guardadas en el equipo).
 - Ningún IPC devuelve valores secretos al renderer. Los valores no van en argumentos del proceso (que son públicos en `/proc/<pid>/cmdline`), solo en su entorno.
 - Si hay secretas: `--append-system-prompt` le indica a Claude usarlas solo por nombre y `permissions.deny` bloquea los comandos que vuelcan el entorno. **No es garantía**: un `echo $VAR` puntual no se puede bloquear sin impedir usar la variable.
 - Cambiar variables requiere reiniciar la sesión (⋮ → Reiniciar sesión; retoma con `--resume`).
@@ -297,6 +297,11 @@ clawhip/
   quieta pisaba el valor con uno viejo (subía y bajaba). Ahora se combina por ventana (resets_at): dentro de la
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
+
+## v0.16.2 — Sin referencias a clientes
+
+- Ejemplos de la interfaz, comentarios, pruebas y fixtures con nombres y tickets ficticios (Acme, Globex,
+  OPS-123…) en lugar de clientes reales. README con capturas a pantalla completa, con datos ficticios.
 
 ## v0.16.1 — Variables con valores largos
 

@@ -112,16 +112,16 @@ async function demo(): Promise<{ page: Page; log: string; root: string; statusLi
     { id: 'initech', name: 'Initech', color: '#e0a03a', path: join(work, 'initech'), env: [plain('AWS_PROFILE', 'initech-prod')] }
   ]
   const sessions = [
-    session('gateway', 'api-gateway health checks', 2, {
+    session('gateway', 'ACME-142 api-gateway health checks', 2, {
       env: [
         plain('API_BASE_URL', 'https://api.dev.acme.example'),
         { name: 'DATABASE_PASSWORD', source: { kind: 'local' }, updatedAt: '2026-11-26T00:00:00.000Z' },
         { name: 'STRIPE_KEY', source: { kind: 'aws-sm', profile: 'acme-dev', region: 'us-east-1', secretId: 'acme/dev/payments', jsonKey: 'stripe_key' }, updatedAt: '2026-11-26T00:00:00.000Z' }
       ]
     }),
-    session('pipeline', 'nightly ETL retries', 35),
-    session('billing', 'billing migration plan', 80),
-    session('infra', 'terraform upgrade', 190),
+    session('pipeline', 'ACME-118 ACME-121 nightly ETL retries', 35),
+    session('billing', 'INI-57 billing migration plan', 80),
+    session('infra', 'INI-63 terraform upgrade', 190),
     session('notes', 'weekly notes', 600)
   ]
   writeFileSync(join(ud, 'sessions.json'), JSON.stringify({ folders, sessions, selectedId: ids.gateway }))
@@ -138,8 +138,10 @@ async function demo(): Promise<{ page: Page; log: string; root: string; statusLi
   })
   await app.evaluate(({ BrowserWindow }) => {
     const w = BrowserWindow.getAllWindows()[0]
-    w.unmaximize()
-    w.setContentSize(1440, 880)
+    // Pantalla completa a 1920×1080, como se usa la app (no la ventana chica con la que abre).
+    w.setFullScreen(false)
+    w.setBounds({ x: 0, y: 0, width: 1920, height: 1080 })
+    w.setContentSize(1920, 1080)
   })
   const page = await app.firstWindow()
   await page.waitForSelector('.tabbar')

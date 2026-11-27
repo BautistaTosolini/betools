@@ -172,7 +172,7 @@ export function Sidebar(props: Props) {
                           <input
                             autoFocus
                             value={draft}
-                            placeholder="VE-123 task summary  ·  VE-123 VE-130 summary"
+                            placeholder="OPS-123 task summary  ·  OPS-123 OPS-130 summary"
                             onChange={(e) => setDraft(e.target.value)}
                             onBlur={() => commit(s.id)}
                             onKeyDown={(e) => {

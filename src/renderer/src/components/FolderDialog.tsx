@@ -88,7 +88,7 @@ export function FolderDialog({ folder, usedColors, onSave, onDelete, onCancel }:
         <label>
           Working path (new sessions start here)
           <div className="row">
-            <input type="text" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/home/…/workdir/infra/clients/vemo" />
+            <input type="text" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/home/…/workdir/infra/clients/acme" />
             <button onClick={pick}>Browse…</button>
           </div>
         </label>
