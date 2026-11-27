@@ -298,6 +298,16 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.16.0 — Edición visual de Markdown
+
+- Visor de Markdown: modo Visual (por defecto) para editar sobre el documento renderizado, como en Notion
+  (TipTap). El modo Source con vista previa sigue como opción (Visual | Source); se recuerda el último.
+- Guardar no reformatea: los bloques e ítems de lista sin cambios quedan byte a byte como estaban; solo se
+  reescribe lo editado (md-merge.ts). Los ítems editados usan la viñeta de la lista. Marcadores como
+  <Cliente> que el archivo ya usa no se escapan. El front matter no se muestra y se conserva.
+- Archivos con bloques HTML, definiciones de links, MDX o CRLF abren en Source con el motivo.
+- Pruebas: Vitest 477 y Playwright 34.
+
 ## v0.15.0 — Paneles de comandos en Rendered, respuestas escritas y edición de Markdown
 
 - Paneles de comandos con interfaz (/usage, /status, /config, /model, /mcp, /hooks, /memory, /permissions,
