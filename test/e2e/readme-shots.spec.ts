@@ -193,6 +193,9 @@ test('README screenshots', async () => {
   await expect(p.locator('.artifact-name', { hasText: 'PLAN.md' })).toBeVisible()
   await p.waitForTimeout(800)
   await shot(p, 'rendered')
+  // La barra lateral sola: en la captura completa, achicada en el README, los tickets no se llegan a leer.
+  const bar = (await p.locator('.sidebar').boundingBox())!
+  await p.screenshot({ path: join(OUT, 'sidebar.png'), clip: { x: bar.x, y: bar.y, width: bar.width, height: 520 } })
 
   // Permiso pedido por Claude, respondido desde Rendered.
   await p.locator('.composer textarea').fill('ask')
