@@ -1051,3 +1051,34 @@ test.describe('Session title and claude --resume', () => {
     await expect(p.locator('.sidebar .session')).toHaveCount(1)
   })
 })
+
+test.describe('Continue in new session', () => {
+  test('the session writes a focused handoff and a new session in the same folder starts from it', async () => {
+    ctx = await launch({ folderEnv: { E2E_FOLDER: 'from-folder' } })
+    const p = ctx.page
+    const starts = () => events(ctx).filter((e) => e.ev === 'start')
+    await expect.poll(() => starts().length).toBe(1)
+    await p.locator('.kebab-btn[title="Session actions"]').click()
+    await p.locator('.menu-item', { hasText: 'Continue in new session…' }).click()
+    await expect(p.locator('.modal h2')).toHaveText('Continue in a new session')
+    await p.locator('.modal.handoff textarea').fill('the healthz endpoint')
+    await p.locator('.modal.handoff input').fill('ACME-8 healthz')
+    await p.locator('.modal.handoff button', { hasText: 'Hand off' }).click()
+
+    // La sesión actual recibe el pedido, enfocado en ese punto.
+    await expect.poll(() => events(ctx).some((e) => e.ev === 'input' && String(e.data).includes('It will work on: the healthz endpoint'))).toBe(true)
+    // Al terminar: sesión nueva en la misma carpeta, seleccionada, con el traspaso como primer mensaje.
+    await expect(p.locator('.modal.handoff')).toHaveCount(0, { timeout: 20_000 })
+    await expect(p.locator('.sidebar .session')).toHaveCount(2)
+    await expect(p.locator('.sidebar .session.selected .ticket')).toHaveText('ACME-8')
+    await expect.poll(() => starts().length, { timeout: 15_000 }).toBe(2)
+    const second = starts()[1]
+    expect(second.sessionId).not.toBe(ctx.id)
+    expect(second.args[0]).toContain('This session continues work handed off from another session')
+    expect(second.args[0]).toContain('Echo: [betools handoff')
+    expect(second.args[0]).toContain('Work on: the healthz endpoint')
+    expect(second.env).toEqual({ E2E_FOLDER: 'from-folder' })
+    const file = join(ctx.home, '.claude', 'handoffs', `${second.sessionId}.md`)
+    expect(readFileSync(file, 'utf8')).toContain('# Handoff: the healthz endpoint')
+  })
+})

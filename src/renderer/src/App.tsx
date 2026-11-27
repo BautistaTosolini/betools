@@ -22,6 +22,7 @@ import type { EnvScope } from '../../shared/types'
 import type { DiscoveredSession } from '../../shared/types'
 import { FolderDialog } from './components/FolderDialog'
 import { ask, ConfirmHost } from './components/ConfirmDialog'
+import { HandoffDialog } from './components/HandoffDialog'
 import { folderFor, groupSessions, NO_FOLDER_COLOR, sessionLabel, textOn } from './grouping'
 
 const api = window.clawhip
@@ -117,6 +118,7 @@ export function App() {
   const [shellOpen, setShellOpen] = useState<Set<string>>(new Set())
   // Diálogo de comandos abierto, con la carpeta que muestra (null: solo los globales).
   const [commandsFor, setCommandsFor] = useState<{ folder: Folder | null } | null>(null)
+  const [handoffFrom, setHandoffFrom] = useState<Session | null>(null)
   const [globalCommands, setGlobalCommands] = useState<SavedCommand[]>([])
   const tabOf = (id: string): Tab => tabs[id] ?? 'rendered'
   // El borrador tiene un solo dueño para no enviarse dos veces: al ir a la CLI, lo que escribiste en Rendered
@@ -468,6 +470,7 @@ export function App() {
                         sessionId: selected.id
                       })
                   },
+                  { label: 'Continue in new session…', onClick: () => setHandoffFrom(selected) },
                   {
                     label: 'Restart session',
                     onClick: async () => {
@@ -636,6 +639,22 @@ export function App() {
               : undefined
           }
           onCancel={() => setFolderEdit(undefined)}
+        />
+      )}
+      {handoffFrom && (
+        <HandoffDialog
+          session={handoffFrom}
+          label={(() => {
+            const l = sessionLabel(titles[handoffFrom.id], handoffFrom.name)
+            return [...l.tickets, l.summary ?? handoffFrom.name].join(' ')
+          })()}
+          tickets={sessionLabel(titles[handoffFrom.id], handoffFrom.name).tickets}
+          onClose={() => setHandoffFrom(null)}
+          onDone={async (s) => {
+            setHandoffFrom(null)
+            await refresh()
+            select(s.id)
+          }}
         />
       )}
       <ConfirmHost />

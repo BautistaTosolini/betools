@@ -1,6 +1,6 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync, unwatchFile, watchFile } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unwatchFile, watchFile, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { PtyManager } from './pty-manager'
@@ -14,6 +14,7 @@ import { discoverSessions } from './discover'
 import { migrateLegacyData } from './migrate'
 import { TabTitles } from './titles'
 import { writeResumeTitle } from './resume-title'
+import { handoffFile, handoffPrompt, handoffReply, handoffRequest } from './handoff'
 import { findTranscript } from './claude-paths'
 import { DailyTokenCounter, StatusLineWatcher } from './usage'
 import { INTERRUPTED } from './transcript-parser'
@@ -425,6 +426,59 @@ function registerIpc(): void {
   })
   ipcMain.handle('sessions:setTitle', (_e, id: string, title: string) => {
     if (store.find(id)) titles.set(id, title)
+  })
+
+  // Continuar en una sesión nueva: la actual escribe un traspaso enfocado en `focus` y la nueva (mismo
+  // directorio, misma carpeta) arranca con él. El traspaso se guarda en ~/.claude/handoffs/<sesión nueva>.md.
+  const handoffs = new Map<string, { cancelled: boolean }>()
+  ipcMain.handle('sessions:handoff', async (_e, fromId: string, focus: string, title: string): Promise<Session> => {
+    const from = store.find(fromId)
+    if (!from) throw new Error('The session no longer exists.')
+    if (!focus.trim()) throw new Error('Write what the new session will work on.')
+    if (!ptys.isRunning(fromId)) throw new Error('Claude is not running in this session: open it and try again.')
+    const st0 = status.get(fromId)
+    if (st0 === 'working' || st0 === 'waiting') throw new Error('Claude is busy in this session: wait until it finishes.')
+    if (handoffs.has(fromId)) throw new Error('A handoff from this session is already in progress.')
+    const job = { cancelled: false }
+    handoffs.set(fromId, job)
+    try {
+      const token = randomUUID().slice(0, 8)
+      const req = handoffRequest(focus, token)
+      ptys.write(fromId, `\x1b[200~${req}\x1b[201~`)
+      await new Promise((r) => setTimeout(r, 150))
+      ptys.write(fromId, '\r')
+      // Espera a que Claude termine el turno con la respuesta (hasta 15 minutos).
+      const deadline = Date.now() + 15 * 60_000
+      let text: string | null = null
+      let worked = false
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1000))
+        if (job.cancelled) throw new Error('Cancelled.')
+        if (!ptys.isRunning(fromId)) throw new Error('Claude exited before writing the handoff.')
+        if (Date.now() > deadline) throw new Error('Claude took too long to write the handoff.')
+        const st = status.get(fromId)
+        if (st === 'working' || st === 'waiting') worked = true
+        text = handoffReply(watcher.conversation(fromId), token)
+        if (text && st !== 'working' && st !== 'waiting' && (worked || st === 'done')) break
+      }
+      const fromLabel = labelOf(from)
+      const id = randomUUID()
+      const dir = join(homedir(), '.claude', 'handoffs')
+      mkdirSync(dir, { recursive: true })
+      const file = join(dir, `${id}.md`)
+      writeFileSync(file, handoffFile({ from: fromLabel, fromId, focus, text, at: new Date().toISOString() }))
+      const now = new Date().toISOString()
+      ptys.setFirstPrompt(id, handoffPrompt({ from: fromLabel, focus, text, file }))
+      const session = addSession({ id, name: from.name, cwd: from.cwd, createdAt: now, lastActiveAt: now })
+      if (title.trim()) titles.set(id, title)
+      return session
+    } finally {
+      handoffs.delete(fromId)
+    }
+  })
+  ipcMain.handle('sessions:handoffCancel', (_e, fromId: string) => {
+    const job = handoffs.get(fromId)
+    if (job) job.cancelled = true
   })
 
   ipcMain.handle('folders:create', (_e, f: Omit<Folder, 'id'>): Folder => {

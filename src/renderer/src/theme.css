@@ -449,3 +449,7 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .modal.confirm h2 { font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
 .confirm-detail { margin: 0; color: var(--text-2); white-space: pre-line; line-height: 1.5; overflow-wrap: anywhere; }
 button.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }
+
+/* Continuar en una sesión nueva */
+.modal.handoff textarea { resize: vertical; min-height: 64px; font: inherit; }
+.handoff-wait { margin: 0; color: var(--link); }

@@ -16,6 +16,8 @@ const api = {
   createSession: (cwd: string, name: string, title?: string): Promise<Session> =>
     ipcRenderer.invoke('sessions:create', cwd, name, title),
   setTitle: (id: string, title: string): Promise<void> => ipcRenderer.invoke('sessions:setTitle', id, title),
+  handoff: (fromId: string, focus: string, title: string): Promise<Session> => ipcRenderer.invoke('sessions:handoff', fromId, focus, title),
+  cancelHandoff: (fromId: string): Promise<void> => ipcRenderer.invoke('sessions:handoffCancel', fromId),
   onTitle: (cb: (id: string, title: string | null) => void) => on('session:title', cb),
   createFolder: (f: Omit<Folder, 'id'>): Promise<Folder> => ipcRenderer.invoke('folders:create', f),
   updateFolder: (id: string, patch: Partial<Omit<Folder, 'id'>>): Promise<Folder> =>

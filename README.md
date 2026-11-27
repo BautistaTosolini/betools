@@ -88,6 +88,14 @@ Comandos que se corren con un clic desde **▶ Commands**, en la pestaña Termin
 
 ![Comandos de la carpeta y globales](docs/screenshots/commands.png)
 
+### Continuar en una sesión nueva
+
+Desde el menú ⋮ de la sesión, **Continue in new session…** pide en qué va a trabajar la sesión nueva (por
+ejemplo, un punto puntual de la tarea). La sesión actual escribe un traspaso solo con el contexto necesario para
+eso, no un resumen de todo, y se abre una sesión nueva en el mismo directorio y la misma carpeta que arranca con
+ese traspaso como primer mensaje. El traspaso queda guardado en `~/.claude/handoffs/<id de la sesión nueva>.md`,
+fuera del repositorio.
+
 ## Instalación
 
 Requisitos:

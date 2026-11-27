@@ -66,7 +66,14 @@ export class PtyManager {
   // Sesiones resolviendo variables antes de lanzar: evita lanzar dos veces y guarda el último tamaño.
   private readonly starting = new Map<string, { cols: number; rows: number }>()
 
+  // Primer mensaje de una sesión nueva (p. ej. el traspaso de otra sesión): va como prompt inicial de claude.
+  private readonly firstPrompt = new Map<string, string>()
+
   constructor(private readonly events: PtyEvents) {}
+
+  setFirstPrompt(id: string, text: string): void {
+    this.firstPrompt.set(id, text)
+  }
 
   isRunning(id: string): boolean {
     return this.entries.has(id)
@@ -124,9 +131,12 @@ export class PtyManager {
 
   private spawn(session: Session, cols: number, rows: number, resolved: ResolvedEnv): void {
     // Sesión con historial → --resume. Sesión nueva (o sin mensajes todavía) → --session-id.
-    const args = transcriptExists(session.cwd, session.id)
-      ? ['--resume', session.id]
-      : ['--session-id', session.id, '--name', session.name]
+    const resume = transcriptExists(session.cwd, session.id)
+    const args = resume ? ['--resume', session.id] : ['--session-id', session.id, '--name', session.name]
+    // Prompt inicial (posicional): primero, para que ningún flag con valor opcional lo tome como suyo.
+    const first = this.firstPrompt.get(session.id)
+    this.firstPrompt.delete(session.id)
+    if (first && !resume) args.unshift(first)
     args.push('--settings', buildSettings(resolved.names.length > 0))
     if (resolved.names.length) args.push('--append-system-prompt', secretsPrompt(resolved.names))
     // Va al final: el nombre es opcional y, sin él, el flag no debe tomar el argumento siguiente.
