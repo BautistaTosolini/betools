@@ -1,3 +1,4 @@
+import { applySlash, slashAt } from '../slash-token'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import type { ConversationItem, SessionStatus, SlashCommand, ToolCall } from '../../../shared/types'
@@ -475,8 +476,10 @@ const SOURCE_LABEL: Record<SlashCommand['source'], string> = { builtin: 'claude'
 function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus; onOpenCli(): void }) {
   const [text, setText] = useDraft(id)
   const cli = useCliInput(id)
-  // Autocompletado de "/": activo mientras el texto es solo "/algo" (sin espacios).
-  const slashQuery = /^\/([^\s]*)$/.exec(text)?.[1] ?? null
+  // Autocompletado de "/": en la palabra "/algo" donde está el cursor, en cualquier parte del mensaje.
+  const [caret, setCaret] = useState(text.length)
+  const slashTok = useMemo(() => slashAt(text, Math.min(caret, text.length)), [text, caret])
+  const slashQuery = slashTok?.query ?? null
   const [commands, setCommands] = useState<SlashCommand[] | null>(null)
   const [pick, setPick] = useState(0)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -492,8 +495,15 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
     listRef.current?.querySelector('.slash-item.on')?.scrollIntoView({ block: 'nearest' })
   }, [pick])
   const accept = (c: SlashCommand) => {
-    setText(`/${c.name} `)
-    requestAnimationFrame(() => ref.current?.focus())
+    const next = slashTok ? applySlash(text, slashTok, c.name) : { text: `/${c.name} `, caret: c.name.length + 2 }
+    setText(next.text)
+    setCaret(next.caret)
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    })
   }
   const ref = useRef<HTMLTextAreaElement>(null)
   const dialog = useDialog(id)
@@ -629,8 +639,10 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
         onChange={(e) => {
           if (panel) return
           setText(e.target.value)
+          setCaret(e.target.selectionStart)
           setFlash(null)
         }}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
         onPaste={(e) => {
           // En un panel lo pegado va directo (p. ej. al buscador).
           if (!panel) return

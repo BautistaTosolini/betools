@@ -367,6 +367,20 @@ test('slash autocomplete: Claude Code commands at once, init skills after, hidde
   expect(events(ctx).filter((e) => e.ev === 'probe').every((e) => e.baseUrl === 'http://127.0.0.1:9')).toBe(true)
 })
 
+test('slash autocomplete also in the middle of a message, completing only that word', async () => {
+  ctx = await launch()
+  const p = ctx.page
+  const c = composer(p)
+  await c.fill('please run ')
+  await c.pressSequentially('/res')
+  await expect(p.locator('.slash-name').first()).toHaveText('/resume')
+  await c.press('Tab')
+  await expect(c).toHaveValue('please run /resume ')
+  await c.pressSequentially('then')
+  await expect(p.locator('.slash-item')).toHaveCount(0)
+  await expect(c).toHaveValue('please run /resume then')
+})
+
 test('Rendered stays at the bottom after switching tabs', async () => {
   ctx = await launch()
   const p = ctx.page
