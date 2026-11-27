@@ -529,6 +529,25 @@ test.describe('Environment variables', () => {
     expect(st.sessions[0].env).toMatchObject([{ name: 'E2E_FOLDER', source: { kind: 'plain', value: 'from-folder' } }])
   })
 
+  test('a long value wraps itself instead of squeezing the storage label', async () => {
+    const host = 'zeroq-prd-cluster.cluster-cxt7lxue0tbf.us-east-2.rds.amazonaws.com.example-very-long-suffix'
+    ctx = await launch({ sessionEnv: { E2E_SHORT: 'x', E2E_HOST: host } })
+    await openSessionEnv(ctx.page)
+    const row = ctx.page.locator('.env-list:not(.inherited) li', { hasText: 'E2E_HOST' })
+    await expect(row.locator('.env-value')).toHaveText(host)
+    // "visible" en una sola línea: tan alto como en una fila con un valor corto.
+    const short = await ctx.page.locator('.env-list:not(.inherited) li', { hasText: 'E2E_SHORT' }).locator('.env-src').boundingBox()
+    const long = await row.locator('.env-src').boundingBox()
+    expect(long!.height).toBe(short!.height)
+    // El que se corta en varias líneas es el valor.
+    expect((await row.locator('.env-value').boundingBox())!.height).toBeGreaterThan(long!.height)
+    if (process.env.E2E_SHOTS) await ctx.page.locator('.modal').screenshot({ path: join(process.env.E2E_SHOTS, 'env-long.png') })
+    // Nada se sale del diálogo.
+    const modal = await ctx.page.locator('.modal').boundingBox()
+    const actions = await row.locator('.env-actions').boundingBox()
+    expect(actions!.x + actions!.width).toBeLessThanOrEqual(modal!.x + modal!.width)
+  })
+
   test('asks before replacing a variable that already exists in the destination', async () => {
     ctx = await launch({ folderEnv: { E2E_DUP: 'folder-value' }, sessionEnv: { E2E_DUP: 'session-value' } })
     const p = ctx.page

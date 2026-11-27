@@ -333,7 +333,7 @@ select {
 .env-editor { display: flex; flex-direction: column; gap: 10px; }
 .env-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--divider); }
 .env-list li {
-  display: grid; grid-template-columns: minmax(120px, auto) auto 1fr auto; align-items: center; gap: 12px;
+  display: grid; grid-template-columns: minmax(120px, auto) minmax(0, auto) 1fr auto; align-items: center; gap: 12px;
   padding: 9px 4px; border-bottom: 1px solid var(--divider);
 }
 .env-list.inherited li { grid-template-columns: minmax(120px, auto) 1fr auto; opacity: 0.85; }
@@ -341,7 +341,7 @@ select {
 .env-list .empty { display: block; }
 .env-name { font-family: ui-monospace, 'JetBrains Mono', monospace; font-weight: 700; }
 .env-value { color: var(--muted); letter-spacing: 2px; }
-.env-src { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.env-src { color: var(--muted); font-size: 12px; overflow-wrap: break-word; }
 .env-actions { display: flex; gap: 6px; }
 .env-form { border: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--card-2); }
 .env-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
