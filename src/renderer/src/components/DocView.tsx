@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import { useZoom } from '../zoom'
 
@@ -31,6 +31,20 @@ interface Draft {
 }
 const drafts = new Map<string, Draft>()
 
+// Editor visual (TipTap): se carga recién al editar en modo Visual.
+const RichEditor = lazy(() => import('./RichEditor'))
+
+// Modo de edición: Visual (sobre lo renderizado, como Notion) o Source (fuente + vista previa). Se recuerda.
+type Mode = 'visual' | 'source'
+const MODE_KEY = 'docEditMode'
+function savedMode(): Mode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'source' ? 'source' : 'visual'
+  } catch {
+    return 'visual'
+  }
+}
+
 // Visor de un .md abierto como pestaña. Se actualiza solo cuando el archivo cambia. Se puede editar con la vista
 // previa al lado; al guardar no se pisa un cambio hecho en disco mientras tanto (p. ej. Claude).
 export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: string; visible: boolean; onOpenDoc(path: string): void }) {
@@ -41,9 +55,16 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
   // El archivo cambió en disco mientras había cambios sin guardar.
   const [conflict, setConflict] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [mode, setModeState] = useState<Mode>(savedMode)
+  // Por qué este archivo no se puede editar en modo Visual (se edita como fuente).
+  const [noVisual, setNoVisual] = useState<string | null>(null)
+  // Cambia cuando el borrador se reemplaza desde afuera (disco, cambio de modo): el editor visual se recarga.
+  const [reload, setReload] = useState(0)
   const zoom = useZoom('chat')
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
+  // Aplica lo último escrito en el editor visual antes de guardar, cambiar de modo o salir.
+  const flushRich = useRef<(() => void) | null>(null)
   const textRef = useRef<string | null>(null)
   textRef.current = text
   const draftRef = useRef(draft)
@@ -67,12 +88,21 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
     const off = api.onDocChanged((p, d) => {
       if (p !== path) return
       if (d) {
+        // Lo último escrito en el editor visual cuenta antes de decidir si hay conflicto.
+        flushRich.current?.()
         const cur = draftRef.current
         if (cur) {
-          // Sin cambios propios, el borrador sigue al archivo. Con cambios, se avisa (salvo que sea el mismo texto,
-          // como el eco de un guardado propio).
-          if (cur.text === textRef.current || cur.text === d.text) setDraft({ text: d.text, base: d.mtime })
-          else if (cur.base !== null) setConflict(true)
+          const known = textRef.current
+          if (d.text === cur.text) {
+            // El disco quedó igual que el borrador (p. ej. el eco de un guardado propio): solo cambia la base.
+            setDraft({ text: cur.text, base: d.mtime })
+          } else if (d.text !== known) {
+            // Cambio real en disco. Sin cambios propios, el borrador lo sigue; con cambios, se avisa.
+            if (cur.text === known) {
+              setDraft({ text: d.text, base: d.mtime })
+              setReload((n) => n + 1)
+            } else if (cur.base !== null) setConflict(true)
+          }
         }
         setText(d.text)
         setUpdated(d.mtime)
@@ -86,14 +116,31 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
     }
   }, [path])
 
+  const effective: Mode = noVisual ? 'source' : mode
+
   const startEdit = () => {
     if (text === null) return
     setDraft({ text, base: updated })
     setConflict(false)
-    requestAnimationFrame(() => editorRef.current?.focus())
+    setReload((n) => n + 1)
+    if (effective === 'source') requestAnimationFrame(() => editorRef.current?.focus())
+  }
+
+  const setMode = (m: Mode) => {
+    flushRich.current?.()
+    setModeState(m)
+    try {
+      localStorage.setItem(MODE_KEY, m)
+    } catch {
+      /* solo es una preferencia */
+    }
+    // El borrador es el mismo en los dos modos; el editor visual se recarga con él.
+    setReload((n) => n + 1)
+    if (m === 'source') requestAnimationFrame(() => editorRef.current?.focus())
   }
 
   const save = async () => {
+    flushRich.current?.()
     const d = draftRef.current
     if (!d || !api.writeDoc || saving) return
     setSaving(true)
@@ -115,6 +162,9 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
   }
 
   const done = () => {
+    flushRich.current?.()
+    const d = draftRef.current
+    const dirty = !!d && d.text !== textRef.current
     if (dirty && !window.confirm('Discard the unsaved changes to this file?')) return
     setDraft(null)
     setConflict(false)
@@ -124,6 +174,7 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
   const takeDisk = () => {
     if (text !== null) setDraft({ text, base: updated })
     setConflict(false)
+    setReload((n) => n + 1)
   }
   const keepMine = () => {
     const d = draftRef.current
@@ -131,13 +182,16 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
     setConflict(false)
   }
 
-  // Ctrl+S guarda; Tab inserta dos espacios en vez de sacar el foco del editor.
-  const onEditorKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  // Ctrl+S guarda, en los dos modos.
+  const onSaveKey = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 's') {
       e.preventDefault()
       void save()
-      return
     }
+  }
+
+  // Tab inserta dos espacios en vez de sacar el foco del editor de fuente.
+  const onEditorKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault()
       const el = e.currentTarget
@@ -161,6 +215,8 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
   const onClick = (e: React.MouseEvent) => {
     const a = (e.target as HTMLElement).closest('a')
     if (!a) return
+    // En el editor visual un clic en un link es para editarlo; Ctrl+clic lo abre.
+    if (draft && effective === 'visual' && !(e.ctrlKey || e.metaKey)) return void e.preventDefault()
     e.preventDefault()
     const href = a.getAttribute('href') ?? ''
     if (/^(https?:|mailto:)/i.test(href)) return void api.openExternal(href)
@@ -187,6 +243,19 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
         <span style={{ flex: 1 }} />
         {CAN_EDIT && draft && (
           <>
+            <div className="seg" role="group" aria-label="Editing mode">
+              <button
+                className={`btn-sm ${effective === 'visual' ? 'on' : ''}`}
+                disabled={!!noVisual}
+                title={noVisual ?? 'Edit on the rendered document'}
+                onClick={() => setMode('visual')}
+              >
+                Visual
+              </button>
+              <button className={`btn-sm ${effective === 'source' ? 'on' : ''}`} title="Edit the Markdown source with a live preview" onClick={() => setMode('source')}>
+                Source
+              </button>
+            </div>
             <button className="btn-sm primary" disabled={!dirty || saving} onClick={() => void save()} title="Save (Ctrl+S)">
               Save
             </button>
@@ -196,7 +265,7 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
           </>
         )}
         {CAN_EDIT && !draft && (
-          <button className="btn-sm" disabled={text === null} onClick={startEdit} title="Edit with live preview">
+          <button className="btn-sm" disabled={text === null} onClick={startEdit} title="Edit this file">
             Edit
           </button>
         )}
@@ -222,8 +291,9 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
           </button>
         </div>
       )}
-      <div className={draft ? 'doc-split' : 'doc-body'}>
-        {draft && (
+      {draft && noVisual && mode === 'visual' && <div className="doc-note">{noVisual} Editing as source.</div>}
+      <div className={draft && effective === 'source' ? 'doc-split' : 'doc-body'} onKeyDown={onSaveKey}>
+        {draft && effective === 'source' && (
           <textarea
             ref={editorRef}
             className="doc-editor"
@@ -240,7 +310,20 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
           {text === null && !error && <p className="muted pad">Loading…</p>}
           {text !== null && (
             <article className="doc" style={{ zoom }}>
-              <Markdown text={draft ? draft.text : text} />
+              {draft && effective === 'visual' ? (
+                <Suspense fallback={<p className="muted">Loading editor…</p>}>
+                  <RichEditor
+                    key={reload}
+                    base={draft.text}
+                    path={path}
+                    onChange={(md) => setDraft({ text: md, base: draftRef.current?.base ?? null })}
+                    onUnsupported={setNoVisual}
+                    flushRef={flushRich}
+                  />
+                </Suspense>
+              ) : (
+                <Markdown text={draft ? draft.text : text} />
+              )}
             </article>
           )}
         </div>

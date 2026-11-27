@@ -561,7 +561,7 @@ test.describe('Environment variables', () => {
 })
 
 test.describe('Markdown viewer: editing', () => {
-  test('edits with live preview, saves with Ctrl+S and never overwrites a change made on disk', async () => {
+  test('Source mode: edits with live preview, saves with Ctrl+S and never overwrites a change made on disk', async () => {
     ctx = await launch({ files: { 'README.md': '# Hola\n\nuno\n' } })
     const p = ctx.page
     const file = join(ctx.cwd, 'README.md')
@@ -569,6 +569,7 @@ test.describe('Markdown viewer: editing', () => {
     await expect(p.locator('.doc h1')).toHaveText('Hola')
 
     await p.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    await p.locator('.doc-bar .seg button', { hasText: /^Source$/ }).click()
     const editor = p.locator('textarea.doc-editor')
     await expect(editor).toBeFocused()
     await editor.fill('# Chau\n\ndos\n')
@@ -597,6 +598,145 @@ test.describe('Markdown viewer: editing', () => {
     await p.locator('.doc-bar button', { hasText: /^Done$/ }).click()
     await expect(p.locator('textarea.doc-editor')).toHaveCount(0)
     await expect(p.locator('.doc h1')).toHaveText('Otra vez Claude')
+  })
+
+  // Estilo que el editor visual no usa (viñetas con *, líneas cortadas a mano, tabla sin alinear, front matter):
+  // lo que no se edita tiene que quedar byte a byte igual.
+  const STYLED = '---\ntitle: Plan\n---\n# Plan\n\nIntro con _énfasis_ y una línea\ncortada a mano.\n\n* uno\n* dos\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nFin.\n'
+  // README.md es el artefacto que deja el transcript de prueba (un Edit): se abre desde el panel de artefactos.
+  const openDoc = async (text: string) => {
+    ctx = await launch({ files: { 'README.md': text } })
+    await ctx.page.locator('.artifact-name', { hasText: 'README.md' }).click()
+    await ctx.page.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    return { p: ctx.page, file: join(ctx.cwd, 'README.md') }
+  }
+  const rich = (p: Page) => p.locator('.rich-md')
+
+  test('Visual mode is the default and edits the rendered document; untouched parts stay byte-identical', async () => {
+    const { p, file } = await openDoc(STYLED)
+    await expect(p.locator('.doc-bar .seg button.on')).toHaveText('Visual')
+    await expect(rich(p).locator('h1')).toHaveText('Plan')
+    await expect(rich(p).locator('table td').first()).toHaveText('1')
+    // Abrir y cerrar sin tocar nada: no hay cambios ni confirmación, el archivo queda igual.
+    await expect(p.locator('.doc-state')).toHaveText('Saved')
+    await p.locator('.doc-bar button', { hasText: /^Done$/ }).click()
+    await expect(rich(p)).toHaveCount(0)
+    expect(readFileSync(file, 'utf8')).toBe(STYLED)
+
+    // Una palabra al final del último párrafo: solo cambia esa línea.
+    await p.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    await rich(p).locator('p', { hasText: 'Fin.' }).click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' Listo')
+    await expect(p.locator('.doc-state')).toHaveText('Unsaved changes')
+    // E2E_SHOTS=<dir> guarda una captura para revisar el aspecto a ojo.
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'doc-visual.png') })
+    await p.keyboard.press('Control+s')
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(STYLED.replace('Fin.\n', 'Fin. Listo\n'))
+    await expect(p.locator('.doc-state')).toHaveText('Saved')
+
+    // Un ítem de lista: los demás ítems y el front matter quedan como estaban.
+    await rich(p).locator('li', { hasText: 'dos' }).click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' y medio')
+    await p.locator('.doc-bar button', { hasText: /^Save$/ }).click()
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(STYLED.replace('Fin.\n', 'Fin. Listo\n').replace('* dos\n', '* dos y medio\n'))
+  })
+
+  // Parecido a los CLAUDE.md y skills reales: marcadores <Cliente> en el texto, código, links, listas anidadas,
+  // tareas, citas, fences y párrafos cortados a mano.
+  const REALISTIC = [
+    '# <Cliente> — workdir',
+    '',
+    'Directorio de trabajo del cliente <Cliente>. Repo `client-context-<jira-key>/` y la',
+    '[guía](https://example.com/guia) de onboarding.',
+    '',
+    '## Reglas',
+    '',
+    '1. **Nunca hacer commit.** Eso lo hace el usuario.',
+    '2. **Leer el contexto.** Al inicio:',
+    '   1. Actualizar el repo: `git -C client-context-<jira-key> pull`.',
+    '   2. Leer `README.md`.',
+    '',
+    '* [ ] revisar perfiles',
+    '* [x] alta en Notion',
+    '',
+    '> Nota: los perfiles están en',
+    '> `~/.aws/config`.',
+    '',
+    '```bash',
+    'aws sts get-caller-identity --profile <cliente>-dev-ro',
+    '```',
+    '',
+    'Párrafo final sin marcadores.',
+    ''
+  ].join('\n')
+
+  test('Visual mode keeps a realistic file byte-identical except the edited line, <placeholders> included', async () => {
+    const { p, file } = await openDoc(REALISTIC)
+    await expect(rich(p).locator('h1')).toHaveText('<Cliente> — workdir')
+    // Una palabra en un párrafo sin marcadores: solo esa línea.
+    await rich(p).locator('p', { hasText: 'Párrafo final' }).click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' Editado.')
+    await p.keyboard.press('Control+s')
+    const once = REALISTIC.replace('Párrafo final sin marcadores.', 'Párrafo final sin marcadores. Editado.')
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(once)
+    // El párrafo con <Cliente> (cortado en dos líneas): los marcadores siguen tal cual, sin escapar.
+    await rich(p).locator('p', { hasText: 'Directorio de trabajo' }).click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' Fin.')
+    await p.keyboard.press('Control+s')
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe(
+      once.replace(
+        'Directorio de trabajo del cliente <Cliente>. Repo `client-context-<jira-key>/` y la\n[guía](https://example.com/guia) de onboarding.',
+        'Directorio de trabajo del cliente <Cliente>. Repo `client-context-<jira-key>/` y la [guía](https://example.com/guia) de onboarding. Fin.'
+      )
+    )
+  })
+
+  test('Visual and Source share the same draft, and the mode is remembered', async () => {
+    const { p, file } = await openDoc('# Notas\n\nuno\n')
+    await rich(p).locator('p', { hasText: 'uno' }).click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' dos')
+    await p.locator('.doc-bar .seg button', { hasText: /^Source$/ }).click()
+    await expect(p.locator('textarea.doc-editor')).toHaveValue('# Notas\n\nuno dos\n')
+    await p.locator('textarea.doc-editor').fill('# Notas\n\nuno dos tres\n')
+    await p.locator('.doc-bar .seg button', { hasText: /^Visual$/ }).click()
+    await expect(rich(p).locator('p')).toHaveText('uno dos tres')
+    expect(readFileSync(file, 'utf8')).toBe('# Notas\n\nuno\n')
+    await p.keyboard.press('Control+s')
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe('# Notas\n\nuno dos tres\n')
+    // Al volver a editar, arranca en el último modo usado.
+    await p.locator('.doc-bar .seg button', { hasText: /^Source$/ }).click()
+    await p.locator('.doc-bar button', { hasText: /^Done$/ }).click()
+    await p.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    await expect(p.locator('.doc-bar .seg button.on')).toHaveText('Source')
+  })
+
+  test('Visual mode: a change on disk is followed without own edits and never overwritten with them', async () => {
+    const { p, file } = await openDoc('# A\n\nuno\n')
+    writeFileSync(file, '# A\n\nde Claude\n')
+    await expect(rich(p).locator('p')).toHaveText('de Claude')
+    await rich(p).locator('p').click()
+    await p.keyboard.press('End')
+    await p.keyboard.type(' mío')
+    writeFileSync(file, '# A\n\notra vez Claude\n')
+    await expect(p.locator('.doc-conflict')).toBeVisible()
+    await p.keyboard.press('Control+s')
+    await expect(p.locator('.doc-conflict')).toBeVisible()
+    expect(readFileSync(file, 'utf8')).toBe('# A\n\notra vez Claude\n')
+    await p.locator('.doc-conflict button', { hasText: 'Load the disk version' }).click()
+    await expect(rich(p).locator('p')).toHaveText('otra vez Claude')
+    await expect(p.locator('.doc-state')).toHaveText('Saved')
+  })
+
+  test('files the visual editor cannot keep intact open in Source mode with the reason', async () => {
+    const { p } = await openDoc('# H\n\n<details>\n<summary>más</summary>\n\nhola\n</details>\n')
+    await expect(p.locator('.doc-note')).toContainText('raw HTML')
+    await expect(p.locator('textarea.doc-editor')).toBeVisible()
+    await expect(p.locator('.doc-bar .seg button', { hasText: /^Visual$/ })).toBeDisabled()
   })
 })
 
