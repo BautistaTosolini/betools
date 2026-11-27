@@ -298,6 +298,12 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.19.1 — Autocompletado de / en cualquier parte del mensaje
+
+- El autocompletado de comandos y skills aparece con la palabra "/algo" donde está el cursor, también en medio
+  del mensaje (después de un espacio o salto de línea); completa solo esa palabra (slash-token.ts). Las rutas
+  ("/home/x") y las barras dentro de una palabra no lo abren.
+
 ## v0.19.0 — Continuar en una sesión nueva
 
 - "Continue in new session…" en el menú de la sesión: se indica en qué va a trabajar la sesión nueva; la actual
