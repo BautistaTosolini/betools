@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
+import { applyShortcut, shortcutFor } from '../md-shortcuts'
+import { FindBar } from './FindBar'
+import { useFindKey } from '../find-key'
 import { useZoom } from '../zoom'
 
 const api = window.clawhip
@@ -32,6 +35,8 @@ interface Draft {
 const drafts = new Map<string, Draft>()
 
 // Editor visual (TipTap): se carga recién al editar en modo Visual.
+const FORMAT_KEYS = 'Ctrl+B bold · Ctrl+I italic · Ctrl+E code · Ctrl+Shift+X strikethrough · Ctrl+K link · Ctrl+S save'
+
 const RichEditor = lazy(() => import('./RichEditor'))
 
 // Modo de edición: Visual (sobre lo renderizado, como Notion) o Source (fuente + vista previa). Se recuerda.
@@ -63,6 +68,15 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
   const zoom = useZoom('chat')
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
+  // Buscador (Ctrl+F): número de veces que se pidió (vuelve a enfocar la barra si ya estaba abierta); 0 = cerrado.
+  const [find, setFind] = useState(0)
+  const findQuery = useRef('')
+  useFindKey(visible, () => setFind((n) => n + 1))
+  // El resaltado es de toda la ventana: al cambiar de pestaña se cierra.
+  useEffect(() => {
+    if (!visible) setFind(0)
+  }, [visible])
   // Aplica lo último escrito en el editor visual antes de guardar, cambiar de modo o salir.
   const flushRich = useRef<(() => void) | null>(null)
   const textRef = useRef<string | null>(null)
@@ -192,6 +206,23 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
 
   // Tab inserta dos espacios en vez de sacar el foco del editor de fuente.
   const onEditorKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Formato (Ctrl+B, Ctrl+I, Ctrl+E, Ctrl+Shift+X, Ctrl+K): como un texto escrito, así Ctrl+Z lo deshace.
+    const kind = shortcutFor(e)
+    if (kind) {
+      const el = e.currentTarget
+      const edit = applyShortcut(kind, el.value, el.selectionStart, el.selectionEnd)
+      if (!edit) return
+      e.preventDefault()
+      el.setSelectionRange(edit.from, edit.to)
+      if (!document.execCommand('insertText', false, edit.insert)) {
+        const next = el.value.slice(0, edit.from) + edit.insert + el.value.slice(edit.to)
+        setDraft({ text: next, base: draftRef.current?.base ?? null })
+      }
+      // Ya (para el próximo atajo) y después del render de React, por si movió el cursor.
+      el.setSelectionRange(edit.selStart, edit.selEnd)
+      requestAnimationFrame(() => el.setSelectionRange(edit.selStart, edit.selEnd))
+      return
+    }
     if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
       e.preventDefault()
       const el = e.currentTarget
@@ -247,12 +278,12 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
               <button
                 className={`btn-sm ${effective === 'visual' ? 'on' : ''}`}
                 disabled={!!noVisual}
-                title={noVisual ?? 'Edit on the rendered document'}
+                title={noVisual ?? `Edit on the rendered document. ${FORMAT_KEYS}`}
                 onClick={() => setMode('visual')}
               >
                 Visual
               </button>
-              <button className={`btn-sm ${effective === 'source' ? 'on' : ''}`} title="Edit the Markdown source with a live preview" onClick={() => setMode('source')}>
+              <button className={`btn-sm ${effective === 'source' ? 'on' : ''}`} title={`Edit the Markdown source with a live preview. ${FORMAT_KEYS}`} onClick={() => setMode('source')}>
                 Source
               </button>
             </div>
@@ -293,17 +324,32 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
       )}
       {draft && noVisual && mode === 'visual' && <div className="doc-note">{noVisual} Editing as source.</div>}
       <div className={draft && effective === 'source' ? 'doc-split' : 'doc-body'} onKeyDown={onSaveKey}>
-        {draft && effective === 'source' && (
-          <textarea
-            ref={editorRef}
-            className="doc-editor"
-            spellCheck={false}
-            value={draft.text}
-            onChange={(e) => setDraft({ text: e.target.value, base: draftRef.current?.base ?? null })}
-            onKeyDown={onEditorKey}
-            onScroll={syncScroll}
-            aria-label="Markdown source"
+        {find > 0 && (
+          <FindBar
+            key={effective + (draft ? 'edit' : 'view')}
+            focusKey={find}
+            root={() => previewRef.current}
+            source={draft && effective === 'source' ? () => editorRef.current : undefined}
+            mirror={() => mirrorRef.current}
+            remember={findQuery}
+            onClose={() => setFind(0)}
           />
+        )}
+        {draft && effective === 'source' && (
+          <div className="doc-editor-wrap">
+            {/* Calco del texto para pintar las coincidencias del buscador (lo llena FindBar, no React). */}
+            <div className="doc-editor-mirror" ref={mirrorRef} aria-hidden />
+            <textarea
+              ref={editorRef}
+              className="doc-editor"
+              spellCheck={false}
+              value={draft.text}
+              onChange={(e) => setDraft({ text: e.target.value, base: draftRef.current?.base ?? null })}
+              onKeyDown={onEditorKey}
+              onScroll={syncScroll}
+              aria-label="Markdown source"
+            />
+          </div>
         )}
         <div className="doc-scroll" ref={previewRef} onClick={onClick}>
           {error && <p className="error small doc-error">{error}</p>}

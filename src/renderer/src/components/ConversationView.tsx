@@ -5,6 +5,8 @@ import { onScreen, screenLines } from '../term-registry'
 import { hintKeys, KEYS, parseDialog, textAnswerKeys, type Dialog, type Form, type Menu } from '../menu-parser'
 import { keyToTerm } from '../panel-nav'
 import { TuiPanel } from './TuiPanel'
+import { FindBar } from './FindBar'
+import { useFindKey } from '../find-key'
 import { useZoom } from '../zoom'
 import { useDraft } from '../drafts'
 import { readActivity, readCliInput, readLive, readQueued, type Activity, type CliInput, type Live } from '../term-registry'
@@ -530,6 +532,8 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
       const k = keys.current
       if (k.slash || !(k.working || k.menu)) return
       const t = e.target as HTMLElement | null
+      // Esc en el buscador lo cierra (no detiene a Claude).
+      if (t?.closest?.('.find-bar')) return
       const inChat = !t || t === document.body || t === ref.current || !!t.closest?.('.conversation-wrap')
       if (!inChat || document.querySelector('[role="dialog"], .modal, .dialog')) return
       e.preventDefault()
@@ -923,6 +927,12 @@ export function ConversationView({
   // termina de cargar, o el área visible que se achica porque aparece el menú o la línea de actividad (al volver
   // de otra pestaña pasaba eso y la conversación quedaba arriba).
   const innerRef = useRef<HTMLDivElement>(null)
+  // Buscador (Ctrl+F) sobre la conversación cargada; se cierra al salir de Rendered (el resaltado es global).
+  const [find, setFind] = useState(0)
+  useFindKey(visible, () => setFind((n) => n + 1))
+  useEffect(() => {
+    if (!visible) setFind(0)
+  }, [visible])
   useLayoutEffect(() => {
     const el = scrollRef.current
     const inner = innerRef.current
@@ -972,6 +982,7 @@ export function ConversationView({
   if (!visible) return null
   return (
     <div className="conversation-wrap" style={{ zoom: chatZoom }}>
+      {find > 0 && <FindBar focusKey={find} root={() => innerRef.current} onClose={() => setFind(0)} />}
       <div className="conversation" ref={scrollRef} onScroll={onScroll} onClick={onClick}>
         <div className="conversation-inner" ref={innerRef}>
         {items === null && <p className="muted pad">Loading…</p>}

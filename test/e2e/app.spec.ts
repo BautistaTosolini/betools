@@ -369,12 +369,97 @@ test('Rendered stays at the bottom after switching tabs', async () => {
   }
 })
 
+test.describe('Find (Ctrl+F)', () => {
+  const bar = (p: Page) => p.locator('.find-bar')
+  const count = (p: Page) => p.locator('.find-count')
+  const highlights = (p: Page) =>
+    p.evaluate(() => {
+      const reg = (CSS as unknown as { highlights: Map<string, Set<Range>> }).highlights
+      return { all: reg.get('find-match')?.size ?? 0, current: reg.get('find-current')?.toString() ? reg.get('find-current')!.size : 0 }
+    })
+
+  test('Rendered: finds in the conversation, Enter moves, Esc closes without reaching Claude; not on the CLI tab', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await expect(p.locator('.msg.assistant')).toContainText('SELECT 1')
+    await p.keyboard.press('Control+f')
+    await expect(bar(p).locator('input')).toBeFocused()
+    await p.keyboard.type('select')
+    await expect(count(p)).toHaveText('1/2')
+    expect(await highlights(p)).toEqual({ all: 2, current: 1 })
+    await p.keyboard.press('Enter')
+    await expect(count(p)).toHaveText('2/2')
+    await p.keyboard.press('Shift+Enter')
+    await expect(count(p)).toHaveText('1/2')
+    await bar(p).locator('input').fill('no-such-text')
+    await expect(count(p)).toHaveText('No results')
+    // Ni Enter ni Esc del buscador llegan a Claude.
+    await p.keyboard.press('Escape')
+    await expect(bar(p)).toHaveCount(0)
+    expect(await highlights(p)).toEqual({ all: 0, current: 0 })
+    expect(events(ctx).filter((e) => e.ev === 'input' && /\x1b|\r/.test(String(e.data)))).toEqual([])
+    // En la pestaña CLI, Ctrl+F es de la terminal.
+    await tab(p, 'CLI')
+    await p.keyboard.press('Control+f')
+    await expect(bar(p)).toHaveCount(0)
+  })
+
+  test('Markdown: finds in the view, in Visual editing and in the Source editor', async () => {
+    ctx = await launch({ files: { 'README.md': '# Notas\n\nuno **dos** tres\n\n- dos\n- cuatro\n' } })
+    const p = ctx.page
+    await p.locator('.artifact-name', { hasText: 'README.md' }).click()
+    await expect(p.locator('.doc h1')).toHaveText('Notas')
+    await p.keyboard.press('Control+f')
+    await p.keyboard.type('dos')
+    await expect(count(p)).toHaveText('1/2')
+    expect((await highlights(p)).all).toBe(2)
+
+    // Editando en Visual: la barra sigue abierta (se vuelve a buscar en el editor).
+    await p.locator('.doc-bar button', { hasText: /^Edit$/ }).click()
+    await expect(p.locator('.rich-md')).toBeVisible()
+    await p.keyboard.press('Control+f')
+    await expect(bar(p).locator('input')).toHaveValue('dos')
+    await expect(count(p)).toHaveText('1/2')
+
+    // Source: las coincidencias se recorren en el texto fuente (pintadas detrás) y se marcan en la vista previa.
+    await p.locator('.doc-bar .seg button', { hasText: /^Source$/ }).click()
+    await p.keyboard.press('Control+f')
+    await p.locator('.find-bar input').fill('dos')
+    await expect(count(p)).toHaveText('1/2')
+    await expect(p.locator('.doc-editor-mirror mark')).toHaveCount(2)
+    await expect(p.locator('.doc-editor-mirror mark.cur')).toHaveText('dos')
+    expect((await highlights(p)).all).toBe(2)
+    await p.keyboard.press('Enter')
+    await expect(count(p)).toHaveText('2/2')
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'find-source.png') })
+    // Esc deja seleccionada la coincidencia en el editor, para seguir editando ahí.
+    await p.keyboard.press('Escape')
+    await expect(bar(p)).toHaveCount(0)
+    await expect(p.locator('.doc-editor-mirror mark')).toHaveCount(0)
+    const sel = await p.locator('textarea.doc-editor').evaluate((el: HTMLTextAreaElement) => [document.activeElement === el, el.value.slice(el.selectionStart, el.selectionEnd), el.selectionStart])
+    expect(sel).toEqual([true, 'dos', '# Notas\n\nuno **dos** tres\n\n- '.length])
+  })
+})
+
 test.describe('copy in the terminal', () => {
-  const clipboard = (c: Ctx) => c.app.evaluate(({ clipboard }) => clipboard.readText())
+  // Portapapeles en memoria dentro de la app de prueba: las pruebas nunca tocan el portapapeles real del sistema
+  // (el de la persona que las corre). Reemplaza los canales clipboard:read/write del proceso principal.
+  const fakeClipboard = (c: Ctx, initial: string) =>
+    c.app.evaluate(({ ipcMain }, text) => {
+      const g = globalThis as { __clip?: string }
+      g.__clip = text
+      ipcMain.removeHandler('clipboard:read')
+      ipcMain.removeHandler('clipboard:write')
+      ipcMain.handle('clipboard:read', () => g.__clip ?? '')
+      ipcMain.handle('clipboard:write', (_e, t: string) => {
+        g.__clip = t
+      })
+    }, initial)
+  const clipboard = (c: Ctx) => c.app.evaluate(() => (globalThis as { __clip?: string }).__clip)
 
   test('OSC 52 from Claude Code reaches the clipboard', async () => {
     ctx = await launch()
-    await ctx.app.evaluate(({ clipboard }) => clipboard.writeText('before'))
+    await fakeClipboard(ctx, 'before')
     await prompt(ctx, 'copy')
     await expect.poll(() => clipboard(ctx)).toBe('copied from fake claude ✓')
   })
@@ -386,7 +471,7 @@ test.describe('copy in the terminal', () => {
     await tab(p, 'CLI')
     const screen = p.locator('.terminal-wrap:visible .xterm-screen')
     await expect(screen).toBeVisible()
-    await ctx.app.evaluate(({ clipboard }) => clipboard.writeText('before'))
+    await fakeClipboard(ctx, 'before')
     // Selección con el mouse sobre la primera línea ("● Fake Claude ready.").
     const box = (await screen.boundingBox())!
     await p.mouse.move(box.x + 2, box.y + 6)
@@ -395,10 +480,30 @@ test.describe('copy in the terminal', () => {
     await p.mouse.up()
     await p.keyboard.press('Control+Shift+C')
     await expect.poll(() => clipboard(ctx)).toContain('Fake Claude')
-    await ctx.app.evaluate(({ clipboard }) => clipboard.writeText('unchanged'))
+    await fakeClipboard(ctx, 'unchanged')
     await p.keyboard.press('Control+C')
     await expect.poll(() => events(ctx).some((e) => e.ev === 'ctrl-c')).toBe(true)
     expect(await clipboard(ctx)).toBe('unchanged')
+  })
+
+  test('Ctrl+Shift+V pastes once (the browser paste does not run as well)', async () => {
+    ctx = await launch()
+    const p = ctx.page
+    await expect.poll(() => events(ctx).some((e) => e.ev === 'hook' && e.event === 'SessionStart')).toBe(true)
+    await tab(p, 'CLI')
+    await expect(p.locator('.terminal-wrap:visible .xterm-screen')).toBeVisible()
+    await fakeClipboard(ctx, 'pasted-once')
+    // Si el atajo no se cancela, Chromium dispara además su "pegar como texto" y xterm pega otra vez.
+    await p.evaluate(() => {
+      const w = window as { __shiftV?: boolean[] }
+      w.__shiftV = []
+      window.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'v') w.__shiftV!.push(e.defaultPrevented)
+      })
+    })
+    await p.keyboard.press('Control+Shift+V')
+    await expect.poll(() => events(ctx).filter((e) => e.ev === 'input' && String(e.data).includes('pasted-once')).length).toBe(1)
+    expect(await p.evaluate(() => (window as { __shiftV?: boolean[] }).__shiftV)).toEqual([true])
   })
 })
 
@@ -712,6 +817,52 @@ test.describe('Markdown viewer: editing', () => {
         'Directorio de trabajo del cliente <Cliente>. Repo `client-context-<jira-key>/` y la [guía](https://example.com/guia) de onboarding. Fin.'
       )
     )
+  })
+
+  test('formatting shortcuts work in both modes and the bar never wraps its buttons', async () => {
+    const { p, file } = await openDoc('# Doc\n\nuno dos tres\n')
+    // Visual: Ctrl+B sobre una palabra seleccionada, Ctrl+K con una URL copiada.
+    await rich(p).locator('p').click()
+    await p.keyboard.press('End')
+    await p.keyboard.press('Control+Shift+ArrowLeft')
+    await p.keyboard.press('Control+b')
+    await expect(rich(p).locator('strong')).toHaveText('tres')
+    await p.keyboard.press('Home')
+    await p.keyboard.press('Control+Shift+ArrowRight')
+    // La URL "copiada" se simula en el proceso principal: la prueba no toca el portapapeles real del sistema.
+    await ctx.app.evaluate(({ ipcMain }) => {
+      ipcMain.removeHandler('clipboard:read')
+      ipcMain.handle('clipboard:read', () => 'https://example.com/uno')
+    })
+    await p.keyboard.press('Control+k')
+    await expect(rich(p).locator('a')).toHaveAttribute('href', 'https://example.com/uno')
+    await p.keyboard.press('Control+s')
+    await expect.poll(() => readFileSync(file, 'utf8')).toBe('# Doc\n\n[uno](https://example.com/uno) dos **tres**\n')
+
+    // Source: Ctrl+I envuelve la selección, de nuevo la saca; Ctrl+Z deshace.
+    await p.locator('.doc-bar .seg button', { hasText: /^Source$/ }).click()
+    const editor = p.locator('textarea.doc-editor')
+    await editor.evaluate((el: HTMLTextAreaElement) => {
+      const i = el.value.indexOf('dos')
+      el.focus()
+      el.setSelectionRange(i, i + 3)
+    })
+    await p.keyboard.press('Control+i')
+    await expect(editor).toHaveValue('# Doc\n\n[uno](https://example.com/uno) *dos* **tres**\n')
+    await p.keyboard.press('Control+i')
+    await expect(editor).toHaveValue('# Doc\n\n[uno](https://example.com/uno) dos **tres**\n')
+    await p.keyboard.press('Control+e')
+    await expect(editor).toHaveValue('# Doc\n\n[uno](https://example.com/uno) `dos` **tres**\n')
+    await p.keyboard.press('Control+z')
+    await expect(editor).toHaveValue('# Doc\n\n[uno](https://example.com/uno) dos **tres**\n')
+
+    // Ventana angosta: los botones de la barra quedan en una línea (se recorta la ruta).
+    await ctx.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(900, 700))
+    // El texto de cada botón entra en una sola línea, sin desbordar (antes "Copy path" quedaba en dos).
+    const wrapped = await p.locator('.doc-bar button').evaluateAll((bs) =>
+      bs.filter((b) => b.scrollHeight > b.clientHeight + 1 || b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent)
+    )
+    expect(wrapped).toEqual([])
   })
 
   test('Visual and Source share the same draft, and the mode is remembered', async () => {

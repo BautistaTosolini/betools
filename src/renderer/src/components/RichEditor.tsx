@@ -42,7 +42,18 @@ export default function RichEditor({
       element: ref.current!,
       extensions: [...extensions, Markdown],
       content: rich.parse(body),
-      editorProps: { attributes: { class: 'md rich-md', spellcheck: 'false', 'aria-label': 'Markdown document' } },
+      editorProps: {
+        attributes: { class: 'md rich-md', spellcheck: 'false', 'aria-label': 'Markdown document' },
+        // Ctrl+K: link sobre lo seleccionado, con la URL seleccionada o la copiada; sobre un link, lo saca.
+        // (Pegar una URL sobre una selección también crea el link.) El resto de los atajos (Ctrl+B, Ctrl+I,
+        // Ctrl+E, Ctrl+Shift+X, Ctrl+Alt+1…6, Ctrl+Shift+7/8/9) vienen con TipTap.
+        handleKeyDown: (_view, e) => {
+          if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'k') return false
+          e.preventDefault()
+          void toggleLink()
+          return true
+        }
+      },
       onUpdate: () => {
         // Combinar el documento entero en cada tecla cuesta ~25 ms en archivos grandes: se hace al dejar de escribir.
         pending = true
@@ -50,6 +61,18 @@ export default function RichEditor({
         timer = setTimeout(flush, 150)
       }
     })
+    const toggleLink = async () => {
+      if (editor.isActive('link')) {
+        editor.chain().focus().extendMarkRange('link').unsetLink().run()
+        return
+      }
+      const { from, to } = editor.state.selection
+      const sel = editor.state.doc.textBetween(from, to, ' ').trim()
+      const isUrl = (t: string) => /^https?:\/\/\S+$/.test(t)
+      const href = isUrl(sel) ? sel : await window.clawhip.readClipboard().then((t) => t.trim()).catch(() => '')
+      if (!isUrl(href) || from === to) return
+      editor.chain().focus().setTextSelection({ from, to }).setLink({ href }).run()
+    }
     let pending = false
     let timer: ReturnType<typeof setTimeout> | undefined
     const flush = () => {

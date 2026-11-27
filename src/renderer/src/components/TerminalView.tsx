@@ -72,6 +72,9 @@ export function TerminalView({ id, visible, active = visible }: Props) {
       if (key === 'v') {
         // Versión web sin HTTPS: no hay acceso al portapapeles; se deja pasar el pegado nativo del navegador.
         if ((api as { nativePaste?: boolean }).nativePaste) return true
+        // Se cancela el atajo del navegador ("pegar como texto"): si no, Chromium dispara además su evento de
+        // pegado y xterm pega el mismo texto otra vez.
+        e.preventDefault()
         api.readClipboard().then((text) => term.paste(text))
         return false
       }
