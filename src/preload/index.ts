@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webFrame, type IpcRendererEvent } from 'electron'
-import type { Artifact, ConversationItem, SlashCommand, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState } from '../shared/types'
+import type { Artifact, ConversationItem, SlashCommand, DailyTokens, PlanLimits, SessionMeta, DiscoveredSession, SavedCommand, EnvScope, EnvSource, EnvVarMeta, Folder, FolderSuggestion, SessionStatus, Session, Settings, StoreState, HandoffState } from '../shared/types'
 
 function on<T extends unknown[]>(channel: string, cb: (...args: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, ...args: unknown[]) => cb(...(args as T))
@@ -16,8 +16,11 @@ const api = {
   createSession: (cwd: string, name: string, title?: string): Promise<Session> =>
     ipcRenderer.invoke('sessions:create', cwd, name, title),
   setTitle: (id: string, title: string): Promise<void> => ipcRenderer.invoke('sessions:setTitle', id, title),
-  handoff: (fromId: string, focus: string, title: string): Promise<Session> => ipcRenderer.invoke('sessions:handoff', fromId, focus, title),
+  handoff: (fromId: string, focus: string, title: string): Promise<void> => ipcRenderer.invoke('sessions:handoff', fromId, focus, title),
   cancelHandoff: (fromId: string): Promise<void> => ipcRenderer.invoke('sessions:handoffCancel', fromId),
+  handoffs: (): Promise<Record<string, HandoffState>> => ipcRenderer.invoke('sessions:handoffs'),
+  onHandoff: (cb: (fromId: string, st: HandoffState | null) => void) => on('handoff:state', cb),
+  onHandoffDone: (cb: (fromId: string, session: Session) => void) => on('handoff:done', cb),
   onTitle: (cb: (id: string, title: string | null) => void) => on('session:title', cb),
   createFolder: (f: Omit<Folder, 'id'>): Promise<Folder> => ipcRenderer.invoke('folders:create', f),
   updateFolder: (id: string, patch: Partial<Omit<Folder, 'id'>>): Promise<Folder> =>

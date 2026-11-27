@@ -166,3 +166,10 @@ export interface SlashCommand {
   description: string
   source: 'builtin' | 'user' | 'project' | 'plugin'
 }
+
+// Traspaso a una sesión nueva en curso: en cola (Claude ocupado), escribiéndose, o con error.
+export interface HandoffState {
+  state: 'queued' | 'writing'
+  focus: string
+  error?: string
+}

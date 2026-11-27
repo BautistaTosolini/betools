@@ -121,7 +121,7 @@ export function TuiPanel({ id, panel, onFocusKeys }: { id: string; panel: Panel;
             <PanelBlock
               key={b.kind + b.row}
               b={b}
-              cursor={cursor === panel.top + b.row}
+              cursor={cursor !== null ? cursor === panel.top + b.row : b.kind === 'item' && b.cursor}
               onMove={() => run(() => moveToRow(io, panel.top + b.row))}
               onPick={() => pick(b.row)}
               onSearch={onFocusKeys}
@@ -205,7 +205,7 @@ function PanelBlock({ b, cursor, onMove, onPick, onSearch }: { b: Block; cursor:
       )
     case 'item':
       return (
-        <div className={`pui-item ${cursor || b.cursor ? 'on' : ''}`} role="option" aria-selected={cursor || b.cursor} onClick={onMove} onDoubleClick={onPick}>
+        <div className={`pui-item ${cursor ? 'on' : ''}`} role="option" aria-selected={cursor} onClick={onMove} onDoubleClick={onPick}>
           {b.icon && <span className={`pui-icon ${b.icon}`}>{ICON[b.icon]}</span>}
           <span className="pui-name">{b.name}</span>
           {b.on !== undefined ? (

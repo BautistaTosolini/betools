@@ -190,6 +190,8 @@ const emitTitle = (id: string) => {
   updateTray()
 }
 
+type HandoffJob = { focus: string; title: string; state: 'queued' | 'writing'; cancelled: boolean; error?: string }
+
 // El título de betools va también al historial de Claude (como /rename), para que claude --resume muestre el
 // mismo nombre que la barra lateral. Se repite al salir Claude: si tenía otro nombre en memoria, lo reescribe.
 function syncResumeTitle(id: string): void {
@@ -430,56 +432,103 @@ function registerIpc(): void {
 
   // Continuar en una sesión nueva: la actual escribe un traspaso enfocado en `focus` y la nueva (mismo
   // directorio, misma carpeta) arranca con él. El traspaso se guarda en ~/.claude/handoffs/<sesión nueva>.md.
-  const handoffs = new Map<string, { cancelled: boolean }>()
-  ipcMain.handle('sessions:handoff', async (_e, fromId: string, focus: string, title: string): Promise<Session> => {
-    const from = store.find(fromId)
-    if (!from) throw new Error('The session no longer exists.')
-    if (!focus.trim()) throw new Error('Write what the new session will work on.')
-    if (!ptys.isRunning(fromId)) throw new Error('Claude is not running in this session: open it and try again.')
-    const st0 = status.get(fromId)
-    if (st0 === 'working' || st0 === 'waiting') throw new Error('Claude is busy in this session: wait until it finishes.')
-    if (handoffs.has(fromId)) throw new Error('A handoff from this session is already in progress.')
-    const job = { cancelled: false }
-    handoffs.set(fromId, job)
-    try {
-      const token = randomUUID().slice(0, 8)
-      const req = handoffRequest(focus, token)
-      ptys.write(fromId, `\x1b[200~${req}\x1b[201~`)
-      await new Promise((r) => setTimeout(r, 150))
-      ptys.write(fromId, '\r')
-      // Espera a que Claude termine el turno con la respuesta (hasta 15 minutos).
-      const deadline = Date.now() + 15 * 60_000
-      let text: string | null = null
-      let worked = false
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 1000))
-        if (job.cancelled) throw new Error('Cancelled.')
-        if (!ptys.isRunning(fromId)) throw new Error('Claude exited before writing the handoff.')
-        if (Date.now() > deadline) throw new Error('Claude took too long to write the handoff.')
-        const st = status.get(fromId)
-        if (st === 'working' || st === 'waiting') worked = true
-        text = handoffReply(watcher.conversation(fromId), token)
-        if (text && st !== 'working' && st !== 'waiting' && (worked || st === 'done')) break
-      }
-      const fromLabel = labelOf(from)
-      const id = randomUUID()
-      const dir = join(homedir(), '.claude', 'handoffs')
-      mkdirSync(dir, { recursive: true })
-      const file = join(dir, `${id}.md`)
-      writeFileSync(file, handoffFile({ from: fromLabel, fromId, focus, text, at: new Date().toISOString() }))
-      const now = new Date().toISOString()
-      ptys.setFirstPrompt(id, handoffPrompt({ from: fromLabel, focus, text, file }))
-      const session = addSession({ id, name: from.name, cwd: from.cwd, createdAt: now, lastActiveAt: now })
-      if (title.trim()) titles.set(id, title)
-      return session
-    } finally {
-      handoffs.delete(fromId)
+  // Si Claude está ocupado, el pedido queda en cola hasta que termine. El estado se avisa con handoff:state
+  // (queued → writing → listo o error) y se puede cancelar mientras no terminó.
+  const handoffs = new Map<string, HandoffJob>()
+  const emitHandoff = (fromId: string) => {
+    const j = handoffs.get(fromId)
+    send('handoff:state', fromId, j ? { state: j.state, focus: j.focus, error: j.error } : null)
+  }
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const busy = (id: string) => ['working', 'waiting'].includes(status.get(id))
+
+  async function runHandoff(fromId: string, job: HandoffJob): Promise<void> {
+    const from = store.find(fromId)!
+    const check = () => {
+      if (job.cancelled) throw new Error('Cancelled.')
+      if (!store.find(fromId)) throw new Error('The session was closed.')
     }
+    // Claude sin abrir: se levanta (tamaño provisorio; la terminal lo corrige al mostrarse).
+    if (!ptys.isRunning(fromId)) {
+      ptys.attach(from, 120, 40)
+      const until = Date.now() + 60_000
+      while (!ptys.isRunning(fromId) || status.get(fromId) === 'stopped') {
+        check()
+        if (Date.now() > until) throw new Error('Claude did not start in this session.')
+        await sleep(500)
+      }
+      await sleep(1500)
+    }
+    // En cola mientras Claude trabaja o espera una respuesta.
+    while (busy(fromId)) {
+      check()
+      if (!ptys.isRunning(fromId)) throw new Error('Claude exited before writing the handoff.')
+      await sleep(1000)
+    }
+    check()
+    job.state = 'writing'
+    emitHandoff(fromId)
+    const token = randomUUID().slice(0, 8)
+    ptys.write(fromId, `\x1b[200~${handoffRequest(job.focus, token)}\x1b[201~`)
+    await sleep(150)
+    ptys.write(fromId, '\r')
+    const deadline = Date.now() + 15 * 60_000
+    // Listo cuando hay respuesta, Claude no está trabajando y la respuesta no cambió desde la vuelta anterior
+    // (una respuesta rápida puede terminar entre dos lecturas del estado).
+    let text: string | null = null
+    let prev: string | null = null
+    for (;;) {
+      await sleep(1000)
+      check()
+      if (!ptys.isRunning(fromId)) throw new Error('Claude exited before writing the handoff.')
+      if (Date.now() > deadline) throw new Error('Claude took too long to write the handoff.')
+      text = handoffReply(watcher.conversation(fromId), token)
+      if (text && !busy(fromId) && text === prev) break
+      prev = busy(fromId) ? null : text
+    }
+    const fromLabel = labelOf(from)
+    const id = randomUUID()
+    const dir = join(homedir(), '.claude', 'handoffs')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, `${id}.md`)
+    writeFileSync(file, handoffFile({ from: fromLabel, fromId, focus: job.focus, text, at: new Date().toISOString() }))
+    const now = new Date().toISOString()
+    ptys.setFirstPrompt(id, handoffPrompt({ from: fromLabel, focus: job.focus, text, file }))
+    const session = addSession({ id, name: from.name, cwd: from.cwd, createdAt: now, lastActiveAt: now })
+    if (job.title.trim()) titles.set(id, job.title)
+    handoffs.delete(fromId)
+    emitHandoff(fromId)
+    send('handoff:done', fromId, session)
+  }
+
+  ipcMain.handle('sessions:handoff', (_e, fromId: string, focus: string, title: string): void => {
+    if (!store.find(fromId)) throw new Error('The session no longer exists.')
+    if (!focus.trim()) throw new Error('Write what the new session will work on.')
+    const cur = handoffs.get(fromId)
+    if (cur && !cur.error) throw new Error('A handoff from this session is already in progress.')
+    const job: HandoffJob = { focus, title, state: busy(fromId) ? 'queued' : 'writing', cancelled: false }
+    if (!ptys.isRunning(fromId)) job.state = 'queued'
+    handoffs.set(fromId, job)
+    emitHandoff(fromId)
+    runHandoff(fromId, job).catch((e) => {
+      if (handoffs.get(fromId) !== job) return
+      const msg = e instanceof Error ? e.message : String(e)
+      if (msg === 'Cancelled.') handoffs.delete(fromId)
+      else job.error = msg
+      emitHandoff(fromId)
+    })
   })
   ipcMain.handle('sessions:handoffCancel', (_e, fromId: string) => {
     const job = handoffs.get(fromId)
-    if (job) job.cancelled = true
+    if (!job) return
+    job.cancelled = true
+    // Un error ya mostrado se descarta; uno en curso se corta en el próximo paso.
+    handoffs.delete(fromId)
+    emitHandoff(fromId)
   })
+  ipcMain.handle('sessions:handoffs', () =>
+    Object.fromEntries([...handoffs].map(([id, j]) => [id, { state: j.state, focus: j.focus, error: j.error }]))
+  )
 
   ipcMain.handle('folders:create', (_e, f: Omit<Folder, 'id'>): Folder => {
     assertDir(f.path)

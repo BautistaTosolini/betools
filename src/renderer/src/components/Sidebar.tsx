@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Folder, Session, SessionStatus } from '../../../shared/types'
+import type { Folder, HandoffState, Session, SessionStatus } from '../../../shared/types'
 import { basePathFor, NO_FOLDER_COLOR, sessionLabel, textOn, type Group } from '../grouping'
 import { SettingsMenu } from './SettingsMenu'
 import { Kebab } from './Kebab'
@@ -9,6 +9,8 @@ interface Props {
   selectedId: string | null
   status: Record<string, SessionStatus>
   titles: Record<string, string | null>
+  // Traspasos en curso desde cada sesión (en cola o escribiéndose).
+  handoffs: Record<string, HandoffState>
   shortcutOf: (id: string) => number | null
   onSelect(id: string): void
   onNew(folder?: Folder): void
@@ -143,6 +145,7 @@ export function Sidebar(props: Props) {
                     const { ticket, tickets, summary, fallback } = sessionLabel(titles[s.id], s.name)
                     const sub = relCwd(s, folder)
                     const n = shortcutOf(s.id)
+                    const ho = props.handoffs[s.id]
                     return (
                       <li
                         key={s.id}
@@ -156,7 +159,7 @@ export function Sidebar(props: Props) {
                       >
                         <span className={`dot ${st}`}>{st === 'waiting' ? '!' : ''}</span>
                         <div className="session-body">
-                          {(ticket || st === 'working' || st === 'waiting' || st === 'done') && (
+                          {(ticket || ho || st === 'working' || st === 'waiting' || st === 'done') && (
                             <div className="session-top">
                               {tickets.map((k) => (
                                 <span key={k} className="ticket">
@@ -165,6 +168,11 @@ export function Sidebar(props: Props) {
                               ))}
                               {(st === 'working' || st === 'waiting' || st === 'done') && (
                                 <span className={`status ${st}`}>{STATUS_LABEL[st]}</span>
+                              )}
+                              {ho && (
+                                <span className={`status handoff ${ho.error ? 'error' : ho.state}`} title={`Handoff: ${ho.focus}`}>
+                                  {ho.error ? 'Handoff failed' : ho.state === 'queued' ? 'Handoff queued' : 'Writing handoff'}
+                                </span>
                               )}
                             </div>
                           )}

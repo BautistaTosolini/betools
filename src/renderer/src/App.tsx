@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Folder, SavedCommand, SessionStatus, Session } from '../../shared/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { Folder, HandoffState, SavedCommand, SessionStatus, Session } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
@@ -119,6 +119,10 @@ export function App() {
   // Diálogo de comandos abierto, con la carpeta que muestra (null: solo los globales).
   const [commandsFor, setCommandsFor] = useState<{ folder: Folder | null } | null>(null)
   const [handoffFrom, setHandoffFrom] = useState<Session | null>(null)
+  // Traspasos en curso por sesión de origen (en cola, escribiéndose o con error).
+  const [handoffs, setHandoffs] = useState<Record<string, HandoffState>>({})
+  const selectedRef = useRef<string | null>(null)
+  selectedRef.current = selectedId
   const [globalCommands, setGlobalCommands] = useState<SavedCommand[]>([])
   const tabOf = (id: string): Tab => tabs[id] ?? 'rendered'
   // El borrador tiene un solo dueño para no enviarse dos veces: al ir a la CLI, lo que escribiste en Rendered
@@ -199,7 +203,26 @@ export function App() {
         return next
       })
     )
+    api.handoffs().then(setHandoffs)
+    const offHandoff = api.onHandoff((id, st) =>
+      setHandoffs((prev) => {
+        const next = { ...prev }
+        if (st) next[id] = st
+        else delete next[id]
+        return next
+      })
+    )
+    // Traspaso listo: la sesión nueva aparece y, si seguís mirando la de origen, se abre.
+    const offHandoffDone = api.onHandoffDone(async (fromId, s) => {
+      await refresh()
+      if (selectedRef.current === fromId) {
+        setSelectedId(s.id)
+        api.selectSession(s.id)
+      }
+    })
     return () => {
+      offHandoff()
+      offHandoffDone()
       offPending()
       offStatus()
       offSelect()
@@ -372,6 +395,7 @@ export function App() {
             selectedId={selectedId}
             status={status}
             titles={titles}
+            handoffs={handoffs}
             shortcutOf={shortcutOf}
             onSelect={select}
             onNew={(f) => setNewIn(f ?? null)}
@@ -451,6 +475,7 @@ export function App() {
                 <div className="center-meta">
                   {selFolder && <span className="folder-tag">{selFolder.name}</span>}
                   <span>{selected.cwd.replace(/^\/home\/[^/]+/, '~')}</span>
+                  {handoffs[selected.id] && <HandoffChip id={selected.id} h={handoffs[selected.id]} />}
                   {pending.has(selected.id) && (
                     <span className="txt-waiting" title="Environment variables changed while Claude was busy">
                       ⟳ restarts when Claude finishes
@@ -644,17 +669,10 @@ export function App() {
       {handoffFrom && (
         <HandoffDialog
           session={handoffFrom}
-          label={(() => {
-            const l = sessionLabel(titles[handoffFrom.id], handoffFrom.name)
-            return [...l.tickets, l.summary ?? handoffFrom.name].join(' ')
-          })()}
           tickets={sessionLabel(titles[handoffFrom.id], handoffFrom.name).tickets}
+          summary={sessionLabel(titles[handoffFrom.id], handoffFrom.name).summary ?? handoffFrom.name}
+          busy={status[handoffFrom.id] === 'working' || status[handoffFrom.id] === 'waiting'}
           onClose={() => setHandoffFrom(null)}
-          onDone={async (s) => {
-            setHandoffFrom(null)
-            await refresh()
-            select(s.id)
-          }}
         />
       )}
       <ConfirmHost />
@@ -669,4 +687,23 @@ function commandItems(title: string | null, list: SavedCommand[], run: (command:
     ...(title ? [{ label: title, heading: true, onClick: () => {} }] : []),
     ...list.map((c) => ({ label: c.name ? `${c.name}  ·  ${c.command}` : c.command, onClick: () => run(c.command) }))
   ]
+}
+
+// Estado del traspaso de una sesión (en cola, escribiéndose o con error), con cancelar o descartar.
+function HandoffChip({ id, h }: { id: string; h: HandoffState }) {
+  const kind = h.error ? 'error' : h.state
+  const label = h.error ? 'Handoff failed' : h.state === 'queued' ? 'Handoff queued' : 'Writing handoff'
+  const detail = h.error ?? (h.state === 'queued' ? 'sent when Claude finishes' : `“${h.focus.trim()}”`)
+  return (
+    <span className={`handoff-chip ${kind}`} title={`New session will work on: ${h.focus}`} role="status">
+      <span className={kind === 'writing' ? 'handoff-spin' : kind === 'queued' ? 'handoff-dot' : 'handoff-bang'}>
+        {kind === 'error' ? '!' : ''}
+      </span>
+      <b>{label}</b>
+      <span className="handoff-detail">{detail}</span>
+      <button className="handoff-x" onClick={() => window.clawhip.cancelHandoff(id)} title={h.error ? 'Dismiss' : 'Cancel the handoff'}>
+        {h.error ? 'Dismiss' : 'Cancel'}
+      </button>
+    </span>
+  )
 }

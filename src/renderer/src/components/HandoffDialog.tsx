@@ -3,54 +3,66 @@ import type { Session } from '../../../shared/types'
 
 interface Props {
   session: Session
-  // Nombre de la sesión como en la barra lateral, y sus tickets (para proponer el título de la nueva).
-  label: string
+  // Nombre de la sesión como en la barra lateral (tickets y resumen), para mostrar de dónde sale el traspaso.
   tickets: string[]
-  onDone(session: Session): void
+  summary: string
+  busy: boolean
   onClose(): void
 }
 
-// Continuar en una sesión nueva: la sesión actual escribe un traspaso enfocado en lo que se le indica y la nueva
-// (mismo directorio y carpeta) arranca con él como primer mensaje.
-export function HandoffDialog({ session, label, tickets, onDone, onClose }: Props) {
+// Continuar en una sesión nueva: se indica en qué va a trabajar la nueva. Al confirmar, el diálogo se cierra y
+// el traspaso sigue en segundo plano (en cola si Claude está ocupado), con su estado en la sesión.
+export function HandoffDialog({ session, tickets, summary, busy, onClose }: Props) {
   const [focus, setFocus] = useState('')
   const [title, setTitle] = useState(tickets.length ? tickets.join(' ') + ' ' : '')
-  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const start = async () => {
-    if (!focus.trim() || busy) return
-    setBusy(true)
-    setError(null)
+    if (!focus.trim()) return
     try {
-      onDone(await window.clawhip.handoff(session.id, focus, title))
+      await window.clawhip.handoff(session.id, focus, title)
+      onClose()
     } catch (e) {
-      const msg = e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e)
-      if (msg !== 'Cancelled.') setError(msg)
-      setBusy(false)
+      setError(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(e))
     }
   }
 
-  const cancel = () => {
-    if (busy) void window.clawhip.cancelHandoff(session.id)
-    onClose()
-  }
-
   return (
-    <div className="modal-backdrop" onClick={busy ? undefined : cancel}>
-      <div className="modal handoff" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && !busy && cancel()}>
-        <h2>Continue in a new session</h2>
-        <p className="muted small">
-          “{label}” writes a handoff with only the context needed for what you ask, and a new session in the same
-          directory starts from it. The handoff is saved in <code>~/.claude/handoffs</code>, outside the repository.
-        </p>
-        <label>
-          What will the new session work on?
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal handoff" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+        <div className="handoff-head">
+          <span className="menu-badge">Handoff</span>
+          <h2>Continue in a new session</h2>
+          <div className="handoff-from">
+            <span className="muted">from</span>
+            {tickets.map((k) => (
+              <span key={k} className="ticket">
+                {k}
+              </span>
+            ))}
+            <span className="handoff-from-name">{summary}</span>
+          </div>
+        </div>
+
+        <ol className="handoff-steps">
+          <li>
+            <b>1</b> This session writes a handoff with only what the new one needs
+          </li>
+          <li>
+            <b>2</b> It is saved in <code>~/.claude/handoffs</code>, outside the repository
+          </li>
+          <li>
+            <b>3</b> A new session in the same directory starts from it
+          </li>
+        </ol>
+
+        <div className="field">
+          <span>What will the new session work on?</span>
           <textarea
+            className="handoff-focus"
             autoFocus
             rows={3}
             value={focus}
-            disabled={busy}
             placeholder="e.g. the Mongo connection of the extraction pipeline"
             onChange={(e) => setFocus(e.target.value)}
             onKeyDown={(e) => {
@@ -60,18 +72,28 @@ export function HandoffDialog({ session, label, tickets, onDone, onClose }: Prop
               }
             }}
           />
-        </label>
-        <label>
-          Title of the new session <span className="muted small">· ticket and summary, optional</span>
-          <input value={title} disabled={busy} placeholder="OPS-123 task summary" onChange={(e) => setTitle(e.target.value)} />
-        </label>
-        <p className="muted small">Folder variables are inherited; variables of this session only are not copied.</p>
-        {busy && <p className="handoff-wait">Claude is writing the handoff… you can follow it in Rendered.</p>}
+        </div>
+        <div className="field">
+          <span>
+            Title <span className="muted small">ticket and summary · optional</span>
+          </span>
+          <input value={title} placeholder="OPS-123 task summary" onChange={(e) => setTitle(e.target.value)} />
+        </div>
+
+        {busy && (
+          <p className="handoff-note">
+            Claude is busy in this session. The handoff is queued and sent when it finishes; you can cancel it from
+            the session.
+          </p>
+        )}
         {error && <p className="error">{error}</p>}
-        <div className="actions">
-          <button onClick={cancel}>Cancel</button>
-          <button className="primary" disabled={!focus.trim() || busy} onClick={start}>
-            {busy ? 'Writing handoff…' : 'Hand off'}
+
+        <div className="handoff-foot">
+          <span className="muted small">Folder variables are inherited · this session’s own variables are not copied</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={!focus.trim()} onClick={start} title="Ctrl+Enter">
+            {busy ? 'Queue handoff' : 'Hand off'}
           </button>
         </div>
       </div>

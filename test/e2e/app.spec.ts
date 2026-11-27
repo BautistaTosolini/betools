@@ -1066,24 +1066,33 @@ test.describe('Session title and claude --resume', () => {
 })
 
 test.describe('Continue in new session', () => {
+  const starts = () => events(ctx).filter((e) => e.ev === 'start')
+  const openHandoff = async (p: Page) => {
+    await p.locator('.kebab-btn[title="Session actions"]').click()
+    await p.locator('.menu-item', { hasText: 'Continue in new session…' }).click()
+    await expect(p.locator('.modal.handoff h2')).toHaveText('Continue in a new session')
+  }
+  const requested = () => events(ctx).some((e) => e.ev === 'input' && String(e.data).includes('It will work on: the healthz endpoint'))
+
   test('the session writes a focused handoff and a new session in the same folder starts from it', async () => {
     ctx = await launch({ folderEnv: { E2E_FOLDER: 'from-folder' } })
     const p = ctx.page
-    const starts = () => events(ctx).filter((e) => e.ev === 'start')
     await expect.poll(() => starts().length).toBe(1)
-    await p.locator('.kebab-btn[title="Session actions"]').click()
-    await p.locator('.menu-item', { hasText: 'Continue in new session…' }).click()
-    await expect(p.locator('.modal h2')).toHaveText('Continue in a new session')
+    await openHandoff(p)
     await p.locator('.modal.handoff textarea').fill('the healthz endpoint')
     await p.locator('.modal.handoff input').fill('ACME-8 healthz')
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'handoff.png') })
     await p.locator('.modal.handoff button', { hasText: 'Hand off' }).click()
+    // El diálogo se cierra enseguida; el traspaso sigue en segundo plano.
+    await expect(p.locator('.modal.handoff')).toHaveCount(0)
+    await expect(p.locator('.center-meta .handoff-chip.writing')).toContainText('Writing handoff“the healthz endpoint”')
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'handoff-writing.png') })
 
-    // La sesión actual recibe el pedido, enfocado en ese punto.
-    await expect.poll(() => events(ctx).some((e) => e.ev === 'input' && String(e.data).includes('It will work on: the healthz endpoint'))).toBe(true)
-    // Al terminar: sesión nueva en la misma carpeta, seleccionada, con el traspaso como primer mensaje.
-    await expect(p.locator('.modal.handoff')).toHaveCount(0, { timeout: 20_000 })
-    await expect(p.locator('.sidebar .session')).toHaveCount(2)
+    await expect.poll(requested).toBe(true)
+    // Listo: sesión nueva en la misma carpeta, seleccionada, con el traspaso como primer mensaje.
+    await expect(p.locator('.sidebar .session')).toHaveCount(2, { timeout: 20_000 })
     await expect(p.locator('.sidebar .session.selected .ticket')).toHaveText('ACME-8')
+    await expect(p.locator('.handoff-chip')).toHaveCount(0)
     await expect.poll(() => starts().length, { timeout: 15_000 }).toBe(2)
     const second = starts()[1]
     expect(second.sessionId).not.toBe(ctx.id)
@@ -1093,5 +1102,41 @@ test.describe('Continue in new session', () => {
     expect(second.env).toEqual({ E2E_FOLDER: 'from-folder' })
     const file = join(ctx.home, '.claude', 'handoffs', `${second.sessionId}.md`)
     expect(readFileSync(file, 'utf8')).toContain('# Handoff: the healthz endpoint')
+  })
+
+  test('while Claude works the handoff is queued, shown on the session, and sent when it finishes', async () => {
+    ctx = await launch({})
+    const p = ctx.page
+    await prompt(ctx, 'work')
+    await expect(p.locator('.sidebar .session .status.working')).toBeVisible()
+    await openHandoff(p)
+    await expect(p.locator('.handoff-note')).toContainText('queued')
+    await p.locator('.modal.handoff textarea').fill('the healthz endpoint')
+    await p.locator('.modal.handoff button', { hasText: 'Queue handoff' }).click()
+    await expect(p.locator('.center-meta .handoff-chip.queued')).toContainText('Handoff queued')
+    await expect(p.locator('.sidebar .session .status.handoff')).toHaveText('Handoff queued')
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'handoff-queued.png') })
+    expect(requested()).toBe(false)
+    // Claude termina: se manda el pedido y se crea la sesión.
+    await expect.poll(requested, { timeout: 15_000 }).toBe(true)
+    await expect(p.locator('.sidebar .session')).toHaveCount(2, { timeout: 20_000 })
+    await expect(p.locator('.handoff-chip')).toHaveCount(0)
+  })
+
+  test('a queued handoff can be cancelled and is never sent', async () => {
+    ctx = await launch({})
+    const p = ctx.page
+    await prompt(ctx, 'work')
+    await openHandoff(p)
+    await p.locator('.modal.handoff textarea').fill('the healthz endpoint')
+    await p.locator('.modal.handoff button', { hasText: 'Queue handoff' }).click()
+    await p.locator('.handoff-chip button', { hasText: 'Cancel' }).click()
+    await expect(p.locator('.handoff-chip')).toHaveCount(0)
+    await expect(p.locator('.sidebar .session .status.handoff')).toHaveCount(0)
+    // Claude termina y no pasa nada más.
+    await expect(p.locator('.sidebar .session .status.working')).toHaveCount(0, { timeout: 15_000 })
+    await p.waitForTimeout(2500)
+    expect(requested()).toBe(false)
+    await expect(p.locator('.sidebar .session')).toHaveCount(1)
   })
 })
