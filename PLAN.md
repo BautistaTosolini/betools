@@ -298,6 +298,16 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.18.0 — Comandos globales, botón de variables y precedencia visible
+
+- Botón Variables junto a ▶ Commands en la sesión. ▶ Commands aparece en todas las sesiones.
+- Comandos globales (todas las sesiones) además de los de carpeta. El menú los agrupa por encabezado y en
+  "Edit commands…" cada comando se puede mover a Global o a otra carpeta; todo se guarda junto (commands:save).
+- Variables de una sesión divididas en "Folder" y "This session": las de la sesión tienen precedencia y la de
+  la carpeta que pisan se marca. En una carpeta se ven también las variables propias de cada sesión hija.
+- La barra lateral ya no muestra el ^N junto a cada sesión: el atajo Ctrl+N está en el tooltip.
+- README con capturas nuevas (comandos, buscador). Pruebas: Vitest 483 y Playwright 43.
+
 ## v0.17.1 — El buscador ignora las herramientas
 
 - Ctrl+F en Rendered no busca en las herramientas que usó Claude (comandos, ediciones y resultados).
