@@ -298,6 +298,19 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.17.0 — Buscador, atajos de Markdown y pegado
+
+- Ctrl+F en Rendered y en los .md (al ver y al editar, en Visual y en Source): barra con contador, Enter /
+  Shift+Enter, Esc cierra (no llega a Claude). Resaltado con la API de CSS (sin tocar el DOM); en Source, un
+  calco detrás del textarea pinta las coincidencias y Esc deja seleccionada la actual. En Terminal/CLI, Ctrl+F
+  sigue yendo al proceso. Rendered busca en lo cargado (find.ts, FindBar.tsx).
+- Atajos de Markdown en Visual y Source: Ctrl+B, Ctrl+I, Ctrl+E, Ctrl+Shift+X y Ctrl+K (link con la URL
+  seleccionada o copiada); el mismo atajo saca el formato (md-shortcuts.ts).
+- Barra del documento angosta: los botones no se parten en dos líneas; se recorta la ruta.
+- Ctrl+Shift+V en la terminal pegaba dos veces (además corría el "pegar como texto" de Chromium).
+- Las pruebas de copiar/pegar usan un portapapeles en memoria: ya no tocan el del sistema.
+- Pruebas: Vitest 483 y Playwright 39.
+
 ## v0.16.2 — Sin referencias a clientes
 
 - Ejemplos de la interfaz, comentarios, pruebas y fixtures con nombres y tickets ficticios (Acme, Globex,
