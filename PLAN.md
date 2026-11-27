@@ -298,6 +298,10 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.17.1 — El buscador ignora las herramientas
+
+- Ctrl+F en Rendered no busca en las herramientas que usó Claude (comandos, ediciones y resultados).
+
 ## v0.17.0 — Buscador, atajos de Markdown y pegado
 
 - Ctrl+F en Rendered y en los .md (al ver y al editar, en Visual y en Source): barra con contador, Enter /
