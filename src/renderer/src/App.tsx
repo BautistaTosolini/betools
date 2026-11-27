@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Folder, SessionStatus, Session } from '../../shared/types'
+import type { Folder, SavedCommand, SessionStatus, Session } from '../../shared/types'
 import { Sidebar } from './components/Sidebar'
 import { TerminalView } from './components/TerminalView'
 import { NewSessionDialog } from './components/NewSessionDialog'
 import { Resizer } from './components/Resizer'
 import { ArtifactsPanel } from './components/ArtifactsPanel'
 import { ImportDialog } from './components/ImportDialog'
-import { Kebab } from './components/Kebab'
+import { Kebab, type KebabItem } from './components/Kebab'
 import { Rail } from './components/Rail'
 import { UsageBar } from './components/UsageBar'
 import { ConversationView } from './components/ConversationView'
@@ -114,7 +114,9 @@ export function App() {
     )
   }
   const [shellOpen, setShellOpen] = useState<Set<string>>(new Set())
-  const [commandsFor, setCommandsFor] = useState<Folder | null>(null)
+  // Diálogo de comandos abierto, con la carpeta que muestra (null: solo los globales).
+  const [commandsFor, setCommandsFor] = useState<{ folder: Folder | null } | null>(null)
+  const [globalCommands, setGlobalCommands] = useState<SavedCommand[]>([])
   const tabOf = (id: string): Tab => tabs[id] ?? 'rendered'
   // El borrador tiene un solo dueño para no enviarse dos veces: al ir a la CLI, lo que escribiste en Rendered
   // pasa al prompt de Claude (sin Enter); al volver, lo que quedó en el prompt vuelve a Rendered.
@@ -148,7 +150,7 @@ export function App() {
     showTab(id, 'shell')
     api.runCommand(id, command)
   }
-  const [envFor, setEnvFor] = useState<{ title: string; scope: EnvScope; sessionId?: string } | null>(null)
+  const [envFor, setEnvFor] = useState<{ title: string; scope: EnvScope; sessionId?: string; children?: { id: string; label: string }[] } | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [leftW, setLeftW] = useState(() => loadWidth('leftW2', 320))
   const [rightW, setRightW] = useState(() => loadWidth('rightW', 280))
@@ -173,6 +175,7 @@ export function App() {
     const state = await api.listSessions()
     setSessions(state.sessions)
     setFolders(state.folders)
+    setGlobalCommands(state.commands ?? [])
     setSelectedId(state.selectedId)
     setStatus(state.status)
     setTitles(state.titles)
@@ -380,8 +383,20 @@ export function App() {
               await api.moveFolder(f.id, d)
               await refresh()
             }}
-            onFolderCommands={(f) => setCommandsFor(f)}
-            onFolderEnv={(f) => setEnvFor({ title: `Variables for folder ${f.name}`, scope: { kind: 'folder', id: f.id } })}
+            onFolderCommands={(f) => setCommandsFor({ folder: f })}
+            onFolderEnv={(f) =>
+              setEnvFor({
+                title: `Variables for folder ${f.name}`,
+                scope: { kind: 'folder', id: f.id },
+                // Las sesiones de la carpeta, para mostrar también sus variables propias.
+                children: sessions
+                  .filter((s) => folderFor(s, folders)?.id === f.id)
+                  .map((s) => {
+                    const l = sessionLabel(titles[s.id], s.name)
+                    return { id: s.id, label: [...l.tickets, l.summary ?? s.name].join(' ') }
+                  })
+              })
+            }
             onDeleteFolder={async (f) => {
               if (!window.confirm(`Delete the folder "${f.name}"?\n\nIts sessions stay open and move to "No folder".`)) return
               await api.deleteFolder(f.id)
@@ -503,19 +518,28 @@ export function App() {
                 ))}
               </div>
               <span style={{ flex: 1 }} />
-              {selFolder && (
-                <Kebab
-                  title="Saved folder commands"
-                  label="▶ Commands"
-                  items={[
-                    ...(selFolder.commands ?? []).map((c) => ({
-                      label: c.name ? `${c.name}  ·  ${c.command}` : c.command,
-                      onClick: () => runCommand(selected.id, c.command)
-                    })),
-                    { label: 'Edit folder commands…', onClick: () => setCommandsFor(selFolder) }
-                  ]}
-                />
-              )}
+              <button
+                className="btn-sm"
+                title="Environment variables of this session (and the ones it inherits from its folder)"
+                onClick={() =>
+                  setEnvFor({
+                    title: `Variables for ${selTitle.tickets.join(' ') || selTitle.summary || selected.name}`,
+                    scope: { kind: 'session', id: selected.id },
+                    sessionId: selected.id
+                  })
+                }
+              >
+                Variables
+              </button>
+              <Kebab
+                title="Saved commands (folder and global)"
+                label="▶ Commands"
+                items={[
+                  ...commandItems(selFolder?.name ?? null, selFolder?.commands ?? [], (c) => runCommand(selected.id, c)),
+                  ...commandItems('Global', globalCommands, (c) => runCommand(selected.id, c)),
+                  { label: 'Edit commands…', onClick: () => setCommandsFor({ folder: selFolder ?? null }) }
+                ]}
+              />
             </div>
           )}
           <div className="terminals">
@@ -584,7 +608,15 @@ export function App() {
       {newIn !== undefined && (
         <NewSessionDialog folder={newIn ?? undefined} onCreate={create} onCancel={() => setNewIn(undefined)} />
       )}
-      {commandsFor && <CommandsDialog folder={commandsFor} onSaved={refresh} onClose={() => setCommandsFor(null)} />}
+      {commandsFor && (
+        <CommandsDialog
+          folder={commandsFor.folder}
+          folders={folders}
+          global={globalCommands}
+          onSaved={refresh}
+          onClose={() => setCommandsFor(null)}
+        />
+      )}
       {envFor && <EnvDialog {...envFor} onClose={() => setEnvFor(null)} />}
       {folderEdit !== undefined && (
         <FolderDialog
@@ -605,4 +637,13 @@ export function App() {
       )}
     </div>
   )
+}
+
+// Ítems del menú ▶ Commands de un grupo (carpeta o globales), con su título si tiene comandos.
+function commandItems(title: string | null, list: SavedCommand[], run: (command: string) => void): KebabItem[] {
+  if (!list.length) return []
+  return [
+    ...(title ? [{ label: title, heading: true, onClick: () => {} }] : []),
+    ...list.map((c) => ({ label: c.name ? `${c.name}  ·  ${c.command}` : c.command, onClick: () => run(c.command) }))
+  ]
 }

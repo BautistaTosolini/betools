@@ -52,6 +52,8 @@ export interface StoreState {
   folders: Folder[]
   sessions: Session[]
   selectedId: string | null
+  // Comandos guardados globales: se ofrecen en todas las sesiones (además de los de su carpeta).
+  commands?: SavedCommand[]
 }
 
 export interface FolderSuggestion {

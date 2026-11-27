@@ -436,3 +436,9 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .doc-editor-mirror mark { color: transparent; background: rgba(250, 204, 21, 0.32); }
 .doc-editor-mirror mark.cur { background: #f59e0b; }
 .doc-body, .doc-split { position: relative; }
+.menu-heading { padding: 6px 10px 2px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.env-section { margin: 6px 0 0; font-size: 12.5px; font-weight: 700; color: var(--text); }
+.env-child { display: flex; flex-direction: column; gap: 2px; }
+.env-child-name { font-size: 12px; font-weight: 600; color: var(--text-2); padding: 4px 4px 0; }
+.env-overrides { color: var(--working); }
+.env-child-none { margin: 0; }

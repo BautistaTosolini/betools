@@ -7,6 +7,8 @@ interface Props {
   scope: EnvScope
   // Para una sesión: se muestran las variables heredadas de su carpeta y se ofrece reiniciar.
   sessionId?: string
+  // Para una carpeta: sus sesiones, para mostrar las variables propias de cada una.
+  children?: { id: string; label: string }[]
   // Para una carpeta: cuántas sesiones abiertas tiene (para el aviso de reinicio).
   onClose(): void
 }
@@ -14,7 +16,7 @@ interface Props {
 // Escritorio: el proceso principal reinicia solo las sesiones afectadas. Web: reinicio manual.
 const AUTO_RESTART = !!(window.clawhip as { autoRestart?: boolean }).autoRestart
 
-export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
+export function EnvDialog({ title, scope, sessionId, children, onClose }: Props) {
   const [inherited, setInherited] = useState<{ scope: EnvScope; label: string; vars: EnvVarMeta[] } | undefined>()
   const [dirty, setDirty] = useState(false)
   const [running, setRunning] = useState(false)
@@ -47,7 +49,7 @@ export function EnvDialog({ title, scope, sessionId, onClose }: Props) {
           delete them. Claude is told to use them by name only, and commands that dump the environment (env, printenv…) are
           blocked, but that does not stop a specific command from printing them.
         </p>
-        <EnvEditor scope={scope} inherited={inherited} onChange={() => {
+        <EnvEditor scope={scope} inherited={inherited} sessions={children} onChange={() => {
             setDirty(true)
             setRev((r) => r + 1)
           }} />

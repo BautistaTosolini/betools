@@ -198,6 +198,8 @@ interface Props {
   scope: EnvScope
   // Variables heredadas (de la carpeta) que se muestran como referencia y se pueden pisar.
   inherited?: { scope: EnvScope; label: string; vars: EnvVarMeta[] }
+  // Carpeta: sus sesiones; se muestran sus variables propias (las que pisan a las de la carpeta, marcadas).
+  sessions?: { id: string; label: string }[]
   onChange?(): void
 }
 
@@ -205,13 +207,20 @@ type Target = { scope: EnvScope; label: string }
 // Solo el escritorio tiene carpetas: la versión web no expone mover.
 const CAN_MOVE = typeof (api as { moveEnv?: unknown }).moveEnv === 'function'
 
-export function EnvEditor({ scope, inherited, onChange }: Props) {
+export function EnvEditor({ scope, inherited, sessions, onChange }: Props) {
   const [vars, setVars] = useState<EnvVarMeta[]>([])
   const [form, setForm] = useState<{ existing?: EnvVarMeta; name?: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [targets, setTargets] = useState<Target[]>([])
 
-  const load = () => api.listEnv(scope).then(setVars)
+  const [childVars, setChildVars] = useState<{ id: string; label: string; vars: EnvVarMeta[] }[]>([])
+  const load = () =>
+    Promise.all([
+      api.listEnv(scope).then(setVars),
+      sessions?.length
+        ? Promise.all(sessions.map((s) => api.listEnv({ kind: 'session', id: s.id }).then((vars) => ({ ...s, vars })))).then(setChildVars)
+        : undefined
+    ])
   useEffect(() => {
     load()
     if (CAN_MOVE) api.envMoveTargets(scope).then(setTargets)
@@ -256,13 +265,18 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
   return (
     <div className="env-editor">
       {inherited && inherited.vars.length > 0 && (
+        <h3 className="env-section">
+          Folder <span className="muted small">· inherited by this session</span>
+        </h3>
+      )}
+      {inherited && inherited.vars.length > 0 && (
         <ul className="env-list inherited">
           {inherited.vars.map((v) => (
             <li key={v.name} className={own.has(v.name) ? 'overridden' : ''}>
               <span className="env-name">{v.name}</span>
               <span className="env-src">
-                inherited from {inherited.label} · {v.source.kind === 'plain' ? v.source.value : describeSource(v.source)}
-                {own.has(v.name) && ' · overridden in this session'}
+                {v.source.kind === 'plain' ? v.source.value : describeSource(v.source)}
+                {own.has(v.name) && ' · overridden by this session'}
               </span>
               {!own.has(v.name) && (
                 <span className="env-actions">
@@ -286,6 +300,12 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
           ))}
         </ul>
       )}
+      <h3 className="env-section">
+        {scope.kind === 'session' ? 'This session' : 'This folder'}{' '}
+        <span className="muted small">
+          {scope.kind === 'session' ? '· takes precedence over the folder' : '· every session in the folder receives them'}
+        </span>
+      </h3>
       <ul className="env-list">
         {vars.map((v) => (
           <li key={v.name}>
@@ -330,6 +350,36 @@ export function EnvEditor({ scope, inherited, onChange }: Props) {
         ))}
         {vars.length === 0 && !form && <li className="empty">No variables of its own.</li>}
       </ul>
+      {sessions && sessions.length > 0 && (
+        <>
+          <h3 className="env-section">
+            Sessions in this folder <span className="muted small">· their own variables take precedence over the folder</span>
+          </h3>
+          {childVars
+            .filter((c) => c.vars.length > 0)
+            .map((c) => (
+              <div key={c.id} className="env-child">
+                <div className="env-child-name">{c.label}</div>
+                <ul className="env-list inherited">
+                  {c.vars.map((v) => (
+                    <li key={v.name}>
+                      <span className="env-name">{v.name}</span>
+                      <span className="env-src">
+                        {v.source.kind === 'plain' ? v.source.value : describeSource(v.source)}
+                        {own.has(v.name) && <span className="env-overrides"> · overrides the folder</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          {childVars.some((c) => !c.vars.length) && (
+            <p className="muted small env-child-none">
+              No variables of their own: {childVars.filter((c) => !c.vars.length).map((c) => c.label).join(', ')}
+            </p>
+          )}
+        </>
+      )}
       {error && <p className="error small">{error}</p>}
       {form ? (
         <EnvForm scope={scope} existing={form.existing} initialName={form.name} onDone={done} onCancel={() => setForm(null)} />

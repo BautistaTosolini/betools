@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { EnvScope, EnvVarMeta, Folder, Session, StoreState } from '../shared/types'
+import type { EnvScope, EnvVarMeta, Folder, SavedCommand, Session, StoreState } from '../shared/types'
 
 // Persiste la lista de sesiones en ~/.config/betools/sessions.json.
 // Una sesión solo se elimina cuando el usuario la cierra desde la UI.
@@ -15,7 +15,7 @@ export class SessionStore {
     this.file = join(dir, 'sessions.json')
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<StoreState>
-      this.state = { folders: raw.folders ?? [], sessions: raw.sessions ?? [], selectedId: raw.selectedId ?? null }
+      this.state = { folders: raw.folders ?? [], sessions: raw.sessions ?? [], selectedId: raw.selectedId ?? null, commands: raw.commands ?? [] }
     } catch {
       // Primer arranque o archivo ilegible: se empieza vacío.
     }
@@ -63,6 +63,13 @@ export class SessionStore {
 
   addFolder(folder: Folder): void {
     this.state.folders.push(folder)
+    this.save()
+  }
+
+  // Comandos globales y de carpetas de una vez (así mover uno de un lugar a otro es un solo guardado).
+  setCommands(global: SavedCommand[], folders: Record<string, SavedCommand[]>): void {
+    this.state.commands = global
+    for (const f of this.state.folders) if (folders[f.id]) f.commands = folders[f.id]
     this.save()
   }
 

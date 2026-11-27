@@ -152,7 +152,7 @@ export function Sidebar(props: Props) {
                           setEditing(s.id)
                           setDraft(titles[s.id] ?? '')
                         }}
-                        title={`${s.cwd}\n${STATUS_LABEL[st]}\nDouble-click to edit ticket and summary`}
+                        title={`${s.cwd}\n${STATUS_LABEL[st]}${n !== null ? `\nCtrl+${n} to open` : ''}\nDouble-click to edit ticket and summary`}
                       >
                         <span className={`dot ${st}`}>{st === 'waiting' ? '!' : ''}</span>
                         <div className="session-body">
@@ -189,7 +189,6 @@ export function Sidebar(props: Props) {
                           {sub && <span className="session-cwd">{sub}</span>}
                         </div>
                         <div className="session-side">
-                          {n !== null && <span className="shortcut">^{n}</span>}
                           <button
                             className="icon-btn close"
                             title="Close session"

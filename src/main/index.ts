@@ -586,11 +586,11 @@ function registerIpc(): void {
     const session = store.find(sessionId)
     if (session && command.trim()) shells.run(session, command.trim())
   })
-  ipcMain.handle('folders:setCommands', (_e, folderId: string, commands: SavedCommand[]) => {
-    const clean = commands
-      .map((c) => ({ id: c.id || randomUUID(), name: c.name.trim(), command: c.command.trim() }))
-      .filter((c) => c.command)
-    return store.updateFolder(folderId, { commands: clean })
+  // Comandos guardados: los globales y los de cada carpeta que cambió, en un solo guardado.
+  ipcMain.handle('commands:save', (_e, global: SavedCommand[], folders: Record<string, SavedCommand[]>) => {
+    const clean = (list: SavedCommand[]) =>
+      list.map((c) => ({ id: c.id || randomUUID(), name: c.name.trim(), command: c.command.trim() })).filter((c) => c.command)
+    store.setCommands(clean(global), Object.fromEntries(Object.entries(folders).map(([id, l]) => [id, clean(l)])))
   })
 }
 

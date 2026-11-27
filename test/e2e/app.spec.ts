@@ -50,6 +50,9 @@ interface LaunchOpts {
   sessionEnv?: Record<string, string>
   // Archivos del proyecto que existen antes de abrir la app (nombre relativo al cwd → contenido).
   files?: Record<string, string>
+  // Comandos guardados de la carpeta (la crea si no hay folderEnv) y globales.
+  folderCommands?: { id: string; name: string; command: string }[]
+  globalCommands?: { id: string; name: string; command: string }[]
 }
 
 const plainVars = (vars: Record<string, string>) =>
@@ -68,9 +71,12 @@ async function launch(opts: LaunchOpts = {}): Promise<Ctx> {
   writeFileSync(log, '')
   const id = randomUUID()
   const now = new Date().toISOString()
-  const folders = opts.folderEnv ? [{ id: 'f1', name: 'Client', color: '#5b8def', path: cwd, env: plainVars(opts.folderEnv) }] : []
+  const folders =
+    opts.folderEnv || opts.folderCommands
+      ? [{ id: 'f1', name: 'Client', color: '#5b8def', path: cwd, env: plainVars(opts.folderEnv ?? {}), commands: opts.folderCommands ?? [] }]
+      : []
   const session = { id, name: 'e2e', cwd, createdAt: now, lastActiveAt: now, ...(opts.sessionEnv ? { env: plainVars(opts.sessionEnv) } : {}) }
-  writeFileSync(join(ud, 'sessions.json'), JSON.stringify({ folders, sessions: [session], selectedId: id }))
+  writeFileSync(join(ud, 'sessions.json'), JSON.stringify({ folders, sessions: [session], selectedId: id, commands: opts.globalCommands ?? [] }))
   writeFileSync(join(ud, 'settings.json'), JSON.stringify({ closeToTray: false, autostart: false, notifications: false, eagerStart: false, remoteControl: false }))
   if (opts.history !== false) {
     const dir = join(home, '.claude', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'))
@@ -369,6 +375,50 @@ test('Rendered stays at the bottom after switching tabs', async () => {
   }
 })
 
+test.describe('Saved commands', () => {
+  const store = (c: Ctx) => JSON.parse(readFileSync(join(c.home, '..', 'userdata', 'sessions.json'), 'utf8'))
+
+  test('the menu offers folder and global commands and runs them in the Terminal tab', async () => {
+    ctx = await launch({
+      folderCommands: [{ id: 'c1', name: 'Folder hello', command: 'echo e2e-folder-ran' }],
+      globalCommands: [{ id: 'g1', name: 'Global hello', command: 'echo e2e-global-ran' }]
+    })
+    const p = ctx.page
+    await p.locator('.tabbar .kebab button', { hasText: '▶ Commands' }).click()
+    await expect(p.locator('.menu .menu-heading')).toHaveText(['Client', 'Global'])
+    // El atajo Ctrl+1…9 ya no se muestra al lado de cada sesión.
+    await expect(p.locator('.sidebar .shortcut')).toHaveCount(0)
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'commands-menu.png') })
+    await p.locator('.menu-item', { hasText: 'Global hello' }).click()
+    await expect(p.locator('.tabbar .tab.on')).toHaveText('Terminal')
+    await expect(p.locator('.terminal-wrap:visible .xterm-rows')).toContainText('e2e-global-ran', { timeout: 15_000 })
+  })
+
+  test('commands move between the folder and global and are saved together', async () => {
+    ctx = await launch({ folderCommands: [{ id: 'c1', name: 'Login', command: 'aws sso login' }] })
+    const p = ctx.page
+    await p.locator('.tabbar .kebab button', { hasText: '▶ Commands' }).click()
+    await p.locator('.menu-item', { hasText: 'Edit commands…' }).click()
+    const sections = p.locator('.modal .cmd-section')
+    await expect(sections.locator('h3')).toHaveText([/^Client/, /^Global/])
+    await sections.nth(0).locator('li', { has: p.locator('input[value="Login"]') }).locator('select').selectOption({ label: 'Global' })
+    await expect(sections.nth(1).locator('input[value="Login"]')).toHaveCount(1)
+    await expect(sections.nth(0).locator('li.empty')).toBeVisible()
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'commands-dialog.png') })
+    await sections.nth(1).locator('.cmd-add').click()
+    await sections.nth(1).locator('li').last().locator('input').first().fill('Who')
+    await sections.nth(1).locator('li').last().locator('input.mono').fill('whoami')
+    await p.locator('.modal button.primary', { hasText: 'Save' }).click()
+    await expect(p.locator('.modal')).toHaveCount(0)
+    const st = store(ctx)
+    expect(st.folders[0].commands).toEqual([])
+    expect(st.commands.map((c: { name: string; command: string }) => [c.name, c.command])).toEqual([
+      ['Login', 'aws sso login'],
+      ['Who', 'whoami']
+    ])
+  })
+})
+
 test.describe('Find (Ctrl+F)', () => {
   const bar = (p: Page) => p.locator('.find-bar')
   const count = (p: Page) => p.locator('.find-count')
@@ -660,6 +710,33 @@ test.describe('Environment variables', () => {
     expect(actions!.x + actions!.width).toBeLessThanOrEqual(modal!.x + modal!.width)
   })
 
+  test('the Variables button shows the folder variables and then the session ones, which take precedence', async () => {
+    ctx = await launch({ folderEnv: { E2E_REGION: 'us-east-1', E2E_PROFILE: 'folder-profile' }, sessionEnv: { E2E_PROFILE: 'session-profile' } })
+    const p = ctx.page
+    await p.locator('.tabbar button', { hasText: /^Variables$/ }).click()
+    await expect(p.locator('.modal h2')).toContainText('Variables for')
+    await expect(p.locator('.modal .env-section')).toHaveText([/^Folder · inherited by this session/, /^This session · takes precedence over the folder/])
+    await expect(p.locator('.env-list.inherited li', { hasText: 'E2E_PROFILE' })).toHaveClass(/overridden/)
+    await expect(p.locator('.env-list:not(.inherited) .env-name')).toHaveText(['E2E_PROFILE'])
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'env-session.png') })
+    // Claude recibe la de la sesión.
+    await expect.poll(() => starts(ctx)[0]?.env).toEqual({ E2E_REGION: 'us-east-1', E2E_PROFILE: 'session-profile' })
+  })
+
+  test('the folder dialog also shows the own variables of each session in it', async () => {
+    ctx = await launch({ folderEnv: { E2E_PROFILE: 'folder-profile' }, sessionEnv: { E2E_PROFILE: 'session-profile', E2E_ONLY_SESSION: 'x' } })
+    const p = ctx.page
+    await p.locator('.group-header', { hasText: 'Client' }).locator('.kebab-btn').click()
+    await p.locator('.menu-item', { hasText: 'Environment variables…' }).click()
+    await expect(p.locator('.modal h2')).toContainText('Variables for folder Client')
+    await expect(p.locator('.modal .env-section')).toHaveText([/^This folder/, /^Sessions in this folder/])
+    const child = p.locator('.env-child')
+    await expect(child.locator('.env-child-name')).toHaveText(['e2e'])
+    await expect(child.locator('li', { hasText: 'E2E_PROFILE' })).toContainText('session-profile · overrides the folder')
+    await expect(child.locator('li', { hasText: 'E2E_ONLY_SESSION' })).not.toContainText('overrides')
+    if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'env-folder.png') })
+  })
+
   test('asks before replacing a variable that already exists in the destination', async () => {
     ctx = await launch({ folderEnv: { E2E_DUP: 'folder-value' }, sessionEnv: { E2E_DUP: 'session-value' } })
     const p = ctx.page
@@ -669,7 +746,7 @@ test.describe('Environment variables', () => {
       d.accept()
     })
     await openSessionEnv(p)
-    await expect(p.locator('.env-list.inherited li', { hasText: 'E2E_DUP' })).toContainText('overridden in this session')
+    await expect(p.locator('.env-list.inherited li', { hasText: 'E2E_DUP' })).toContainText('overridden by this session')
     await p.locator('.env-list:not(.inherited) li', { hasText: 'E2E_DUP' }).locator('select.env-move').selectOption({ label: 'folder Client' })
     await expect.poll(() => dialogs.length).toBe(2)
     expect(dialogs[1]).toContain('already has E2E_DUP')

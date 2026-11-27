@@ -47,7 +47,7 @@ function interactive() {
     sessionId,
     statusFile: !!process.env.CLAWHIP_STATUS_FILE,
     // Variables de prueba (E2E_*) que betools pasa al proceso, para verificar las de la sesión y la carpeta.
-    env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('E2E_')))
+    env: Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('E2E_') && k !== 'E2E_SHOTS'))
   })
 
   const dir = join(homedir(), '.claude', 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'))

@@ -124,7 +124,11 @@ async function demo(): Promise<{ page: Page; log: string; root: string; statusLi
     session('infra', 'INI-63 terraform upgrade', 190),
     session('notes', 'weekly notes', 600)
   ]
-  writeFileSync(join(ud, 'sessions.json'), JSON.stringify({ folders, sessions, selectedId: ids.gateway }))
+  const commands = [
+    { id: 'g1', name: 'Git status', command: 'git status -sb' },
+    { id: 'g2', name: 'Claude usage', command: 'npx ccusage daily' }
+  ]
+  writeFileSync(join(ud, 'sessions.json'), JSON.stringify({ folders, sessions, selectedId: ids.gateway, commands }))
   writeFileSync(join(ud, 'settings.json'), JSON.stringify({ closeToTray: false, autostart: false, notifications: false, eagerStart: false, remoteControl: false }))
   for (const k of Object.keys(ids) as (keyof typeof ids)[]) {
     const dir = join(home, '.claude', 'projects', dirs[k].replace(/[^a-zA-Z0-9]/g, '-'))
@@ -223,11 +227,12 @@ test('README screenshots', async () => {
 
   // Variables de entorno de la sesión (con las heredadas de la carpeta).
   await tab(p, 'Rendered')
-  await p.locator('.kebab-btn[title="Session actions"]').click()
-  await p.locator('.menu-item', { hasText: 'Environment variables…' }).click()
+  await p.locator('.tabbar button', { hasText: /^Variables$/ }).click()
   await expect(p.locator('.modal h2')).toContainText('Variables for')
   await p.waitForTimeout(300)
   await shot(p, 'env-vars')
+  await p.locator('.modal button', { hasText: /^Close$/ }).click()
+
 })
 
 test('README screenshot: command panel', async () => {
@@ -236,6 +241,23 @@ test('README screenshot: command panel', async () => {
   demoRoot = r
   await expect.poll(() => started(log)).toBe(true)
   statusBar(statusLine)
+  // Comandos guardados: los de la carpeta y los globales, en el menú y en su diálogo.
+  await p.locator('.tabbar .kebab button', { hasText: '▶ Commands' }).click()
+  await expect(p.locator('.menu .menu-heading')).toHaveText(['Acme', 'Global'])
+  await shot(p, 'commands-menu')
+  await p.locator('.menu-item', { hasText: 'Edit commands…' }).click()
+  await expect(p.locator('.modal .cmd-section')).toHaveCount(2)
+  await p.waitForTimeout(300)
+  await shot(p, 'commands')
+  await p.locator('.modal button', { hasText: /^Cancel$/ }).click()
+
+  // Buscador (Ctrl+F) en la conversación.
+  await p.keyboard.press('Control+f')
+  await p.keyboard.type('healthz')
+  await expect(p.locator('.find-count')).toHaveText(/^1\/\d+$/)
+  await p.waitForTimeout(300)
+  await shot(p, 'find')
+  await p.keyboard.press('Escape')
   // Paneles de la CLI (/config, /usage, /model…) dibujados en Rendered.
   await p.locator('.composer textarea').fill('/config')
   await p.locator('.composer textarea').press('Enter')

@@ -66,8 +66,8 @@ const api = {
   onReset: (cb: (id: string) => void) => on('pty:reset', cb),
 
   runCommand: (sessionId: string, command: string): Promise<void> => ipcRenderer.invoke('shell:run', sessionId, command),
-  setFolderCommands: (folderId: string, commands: SavedCommand[]): Promise<Folder> =>
-    ipcRenderer.invoke('folders:setCommands', folderId, commands),
+  saveCommands: (global: SavedCommand[], folders: Record<string, SavedCommand[]>): Promise<void> =>
+    ipcRenderer.invoke('commands:save', global, folders),
 
   getUsage: (): Promise<{ limits: PlanLimits | null; daily: DailyTokens; meta: Record<string, SessionMeta> }> =>
     ipcRenderer.invoke('usage:get'),
