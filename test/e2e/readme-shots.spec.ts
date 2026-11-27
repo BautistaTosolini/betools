@@ -149,6 +149,13 @@ async function demo(): Promise<{ page: Page; log: string; root: string; statusLi
   })
   const page = await app.firstWindow()
   await page.waitForSelector('.tabbar')
+  // Capturas al 100 % (el zoom por defecto de la app es 110 % / chat 90 %): con zoom, la captura sale recortada.
+  await page.evaluate(() => {
+    localStorage.setItem('zoomApp', '1')
+    localStorage.setItem('zoomChat', '1')
+  })
+  await page.reload()
+  await page.waitForSelector('.tabbar')
   return { page, log, root, statusLine: join(ud, 'status', `${ids.gateway}.status.line`) }
 }
 

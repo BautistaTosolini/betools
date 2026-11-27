@@ -453,3 +453,42 @@ button.danger.solid { background: var(--danger); border-color: var(--danger); co
 /* Continuar en una sesión nueva */
 .modal.handoff textarea { resize: vertical; min-height: 64px; font: inherit; }
 .handoff-wait { margin: 0; color: var(--link); }
+
+/* Paneles de Claude Code como interfaz (panel-blocks.ts) */
+.tui-raw { height: 22px; font-size: 11.5px; }
+.pui { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--tui-bg); box-shadow: inset 0 0 0 1px var(--divider); overflow: auto; font-size: 13px; }
+.pui-tabs { display: flex; gap: 2px; flex-wrap: wrap; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--divider); }
+.pui-tabs button { height: 26px; padding: 0 12px; font-size: 12.5px; background: transparent; border-color: transparent; color: var(--muted); }
+.pui-tabs button:hover { color: var(--text); }
+.pui-tabs button.on { color: var(--text); border-color: var(--border); background: var(--card); box-shadow: inset 0 -2px 0 var(--link); }
+.pui-heading { margin: 6px 0 2px; font-size: 13.5px; font-weight: 600; }
+.pui-text { margin: 0; line-height: 1.45; }
+.pui-muted { color: var(--muted); }
+.pui-small { font-size: 11.5px; }
+.pui-pair, .pui-kv { display: grid; grid-template-columns: minmax(140px, max-content) 1fr; gap: 16px; padding: 2px 0; line-height: 1.4; }
+.pui-pair > span:last-child { overflow-wrap: anywhere; }
+.pui-kv > span:last-child { overflow-wrap: anywhere; font-family: var(--mono); font-size: 12px; }
+.pui-bar { display: flex; flex-direction: column; gap: 4px; padding: 4px 0 6px; }
+.pui-bar-top { display: flex; justify-content: space-between; gap: 12px; }
+.pui-bar-label { font-weight: 600; }
+.pui-bar-pct { font-family: var(--mono); font-size: 12px; color: var(--text-2); }
+.pui-track { height: 8px; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--divider); }
+.pui-fill { height: 100%; background: var(--link); min-width: 0; }
+.pui-fill.mid { background: var(--waiting); }
+.pui-fill.high { background: var(--danger); }
+.pui-item { display: flex; align-items: center; gap: 10px; padding: 4px 8px; cursor: pointer; min-height: 26px; }
+.pui-item:hover { background: var(--hover); }
+.pui-item.on { background: var(--selected); box-shadow: inset 2px 0 0 var(--done); }
+.pui-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pui-value { color: var(--muted); font-size: 12px; text-align: right; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pui-toggle { font-size: 11px; font-weight: 600; padding: 1px 8px; border: 1px solid var(--border); color: var(--muted); }
+.pui-toggle.on { color: var(--done); border-color: color-mix(in srgb, var(--done) 50%, transparent); background: color-mix(in srgb, var(--done) 12%, transparent); }
+.pui-icon { width: 14px; text-align: center; }
+.pui-icon.ok { color: var(--done); }
+.pui-icon.warn { color: var(--waiting); }
+.pui-icon.error { color: var(--danger); }
+.pui-icon.pending, .pui-icon.link { color: var(--muted); }
+.pui-search { padding: 6px 10px; border: 1px solid var(--border); background: var(--card); color: var(--muted); cursor: text; margin: 2px 0 6px; }
+.pui-more { font-size: 12px; padding: 4px 8px; }
+.pui-art { margin: 4px 0; font-family: var(--mono); font-size: 11px; line-height: 1.25; color: var(--text-2); overflow-x: auto; }
+.pui-gap { height: 8px; }

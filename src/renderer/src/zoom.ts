@@ -1,20 +1,23 @@
 import { useEffect, useState } from 'react'
 
 // Zoom global (toda la ventana, con webFrame) y zoom del chat (columna central: Rendered y terminales).
-// Se recuerda por equipo en localStorage (conveniencia; si falla, se arranca en 100 %).
+// Se recuerda por equipo en localStorage (conveniencia; si falla, se arranca en el zoom por defecto).
 export const STEPS = [0.5, 0.67, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5]
 export type ZoomKind = 'app' | 'chat'
+// Por defecto: la ventana al 110 % y el chat al 90 % (lo que vuelve con Ctrl+0).
+export const DEFAULT_ZOOM: Record<ZoomKind, number> = { app: 1.1, chat: 0.9 }
 
-function load(key: string): number {
+function load(key: string, def: number): number {
   try {
-    const v = Number(localStorage.getItem(key))
-    return STEPS.includes(v) ? v : 1
+    const raw = localStorage.getItem(key)
+    const v = Number(raw)
+    return raw !== null && STEPS.includes(v) ? v : def
   } catch {
-    return 1
+    return def
   }
 }
 
-const state: Record<ZoomKind, number> = { app: load('zoomApp'), chat: load('zoomChat') }
+const state: Record<ZoomKind, number> = { app: load('zoomApp', DEFAULT_ZOOM.app), chat: load('zoomChat', DEFAULT_ZOOM.chat) }
 const listeners = new Set<() => void>()
 
 function apply(): void {
@@ -39,7 +42,7 @@ export function setZoom(kind: ZoomKind, value: number): void {
 }
 
 export function stepZoom(kind: ZoomKind, dir: -1 | 0 | 1): void {
-  if (dir === 0) return setZoom(kind, 1)
+  if (dir === 0) return setZoom(kind, DEFAULT_ZOOM[kind])
   const i = STEPS.indexOf(state[kind])
   setZoom(kind, STEPS[Math.min(STEPS.length - 1, Math.max(0, i + dir))])
 }

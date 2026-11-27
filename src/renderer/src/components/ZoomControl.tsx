@@ -1,5 +1,5 @@
 import { Kebab } from './Kebab'
-import { stepZoom, useZoom, type ZoomKind } from '../zoom'
+import { DEFAULT_ZOOM, stepZoom, useZoom, type ZoomKind } from '../zoom'
 
 const pct = (v: number) => `${Math.round(v * 100)}%`
 
@@ -12,19 +12,19 @@ function Row({ kind, label, keys }: { kind: ZoomKind; label: string; keys: strin
         <small>{keys}</small>
       </span>
       <button className="key" onClick={() => stepZoom(kind, -1)} title="Zoom out">−</button>
-      <button className="key zoom-val" onClick={() => stepZoom(kind, 0)} title="Reset to 100%">{pct(v)}</button>
+      <button className="key zoom-val" onClick={() => stepZoom(kind, 0)} title={`Reset to ${pct(DEFAULT_ZOOM[kind])}`}>{pct(v)}</button>
       <button className="key" onClick={() => stepZoom(kind, 1)} title="Zoom in">+</button>
     </div>
   )
 }
 
-// Indicador en la barra de título: muestra el zoom si no es 100 % y abre los controles.
+// Indicador en la barra de título: muestra el zoom si no es el de por defecto y abre los controles.
 export function ZoomControl() {
   const app = useZoom('app')
   const chat = useZoom('chat')
-  const changed = app !== 1 || chat !== 1
+  const changed = app !== DEFAULT_ZOOM.app || chat !== DEFAULT_ZOOM.chat
   return (
-    <Kebab title="Zoom" label={changed ? `${pct(app)}${chat !== 1 ? ` · chat ${pct(chat)}` : ''}` : 'Zoom'}>
+    <Kebab title="Zoom" label={changed ? `${pct(app)} · chat ${pct(chat)}` : 'Zoom'}>
       <div className="zoom-menu">
         <div className="menu-title">Zoom</div>
         <Row kind="app" label="Whole window" keys="Ctrl + / − / 0" />

@@ -592,14 +592,17 @@ test.describe('Rendered: command panels (/config, /usage…)', () => {
     await prompt(ctx, '/config')
     const panel = p.locator('.tui-panel')
     await expect(panel).toBeVisible()
-    await expect(panel.locator('.tui-row', { hasText: 'Auto-compact' })).toHaveClass(/on/)
+    // Interfaz: buscador, ajustes con su estado y pestañas, en lugar del texto de la terminal.
+    await expect(panel.locator('.pui-item', { hasText: 'Auto-compact' })).toHaveClass(/on/)
+    await expect(panel.locator('.pui-search')).toContainText('Search settings')
+    await expect(panel.locator('.pui-item', { hasText: 'Verbose output' }).locator('.pui-toggle')).toHaveText('Off')
     // Sin la conversación de arriba.
     await expect(panel).not.toContainText('Fake Claude ready')
     await expect(composer(p)).toBeFocused()
 
     // Clic en una fila: el cursor va ahí, salteando la línea que no se puede elegir.
-    await panel.locator('.tui-row', { hasText: 'Verbose output' }).click()
-    await expect(panel.locator('.tui-row.on')).toContainText('Verbose output')
+    await panel.locator('.pui-item', { hasText: 'Verbose output' }).click()
+    await expect(panel.locator('.pui-item.on')).toContainText('Verbose output')
     await expect.poll(() => events(ctx).filter((e) => e.ev === 'panel').at(-1)?.cursor).toBe('Verbose output')
 
     // Atajo de la línea de ayuda ("Space to toggle").
@@ -609,8 +612,8 @@ test.describe('Rendered: command panels (/config, /usage…)', () => {
     // Doble clic: mueve y confirma (Enter).
     const enters = () => events(ctx).filter((e) => e.ev === 'input' && e.data === '\r').length
     const before = enters()
-    await panel.locator('.tui-row', { hasText: 'Show tips' }).dblclick()
-    await expect(panel.locator('.tui-row.on')).toContainText('Show tips')
+    await panel.locator('.pui-item', { hasText: 'Show tips' }).dblclick()
+    await expect(panel.locator('.pui-item.on')).toContainText('Show tips')
     await expect.poll(enters).toBe(before + 1)
 
     // El teclado va al panel: el buscador recibe lo escrito.
@@ -620,19 +623,15 @@ test.describe('Rendered: command panels (/config, /usage…)', () => {
     await expect(composer(p)).toHaveValue('')
 
     // Clic en una pestaña.
-    const tabRow = panel.locator('.tui-row', { hasText: /^\s*Settings\s/ })
-    const box = (await tabRow.boundingBox())!
-    const ch = await tabRow.evaluate((el) => {
-      const s = document.createElement('span')
-      s.textContent = 'M'.repeat(10)
-      el.appendChild(s)
-      const w = s.getBoundingClientRect().width / 10
-      s.remove()
-      return w
-    })
-    const line = await tabRow.innerText()
-    await p.mouse.click(box.x + 10 + (line.indexOf('Usage') + 2.5) * ch, box.y + box.height / 2)
+    await panel.locator('.pui-tabs button', { hasText: 'Usage' }).click()
     await expect(panel).toContainText('Usage tab')
+    await expect(panel.locator('.pui-tabs button.on')).toHaveText('Usage')
+
+    // Vista de terminal, como la dibuja Claude Code (se recuerda).
+    await panel.locator('button', { hasText: 'Terminal view' }).click()
+    await expect(panel.locator('.tui-row', { hasText: 'Usage tab' })).toBeVisible()
+    await panel.locator('button', { hasText: 'Interface view' }).click()
+    await expect(panel.locator('.pui')).toBeVisible()
 
     // Esc cierra el panel y vuelve la caja normal.
     await p.keyboard.press('Escape')

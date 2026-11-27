@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { hintKeys, KEYS, type Panel } from '../menu-parser'
+import { panelBlocks, panelHint, type Block } from '../panel-blocks'
 import { moveToRow, switchTab } from '../panel-nav'
 import { cursorRow, nextWrite, onScreen, screenRuns, type Run } from '../term-registry'
 
@@ -61,15 +62,74 @@ export function TuiPanel({ id, panel, onFocusKeys }: { id: string; panel: Panel;
       if (await moveToRow(io, panel.top + row)) api.input(id, KEYS.enter)
     })
 
-  const extra = hintKeys(panel.hint)
+  const hint = panelHint(panel.lines, panel.hint)
+  const extra = hintKeys(hint)
+  const [raw, setRaw] = useState(() => {
+    try {
+      return localStorage.getItem('tui-raw') === '1'
+    } catch {
+      return false
+    }
+  })
+  const toggleRaw = () => {
+    setRaw((r) => {
+      try {
+        localStorage.setItem('tui-raw', r ? '0' : '1')
+      } catch {
+        // sin almacenamiento: solo por ahora
+      }
+      return !r
+    })
+  }
+  // Las filas se leen de la pantalla en cada redibujo: los bloques siguen al panel (cursor, pestaña, scroll).
+  const blocks = useMemo(() => {
+    const lines = rows.map((rs) => rs.map((r) => r.text).join(''))
+    const bold = rows.map((rs) => {
+      const t = rs.filter((r) => r.text.trim())
+      return t.length > 0 && t.every((r) => r.bold)
+    })
+    return panelBlocks(lines, { tabsRow: panel.tabs[0]?.row, hint, bold })
+  }, [rows, panel.tabs, hint])
+  const active = activeTab()
 
   return (
     <div className="menu-panel tui-panel">
       <div className="menu-eyebrow">
         <span className="menu-badge">Claude Code panel</span>
         <span className="tui-tip">Click a row to move · double-click to select · keys below go to the panel</span>
+        <span style={{ flex: 1 }} />
+        <button className="btn-sm ghost tui-raw" onClick={toggleRaw} title="Show the panel as Claude Code draws it">
+          {raw ? 'Interface view' : 'Terminal view'}
+        </button>
       </div>
-      <pre className="tui-screen" role="listbox">
+      {!raw && (
+        <div className="pui" role="listbox">
+          {panel.tabs.length > 0 && (
+            <div className="pui-tabs">
+              {panel.tabs.map((t, i) => (
+                <button
+                  key={t.label}
+                  className={i === active ? 'on' : ''}
+                  onClick={() => run(() => switchTab({ active: activeTab, send: io.send, wait: io.wait }, i, panel.tabs.length))}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {blocks.map((b) => (
+            <PanelBlock
+              key={b.kind + b.row}
+              b={b}
+              cursor={cursor === panel.top + b.row}
+              onMove={() => run(() => moveToRow(io, panel.top + b.row))}
+              onPick={() => pick(b.row)}
+              onSearch={onFocusKeys}
+            />
+          ))}
+        </div>
+      )}
+      {raw && <pre className="tui-screen" role="listbox">
         {rows.map((runs, i) => (
           <div
             key={i}
@@ -80,7 +140,7 @@ export function TuiPanel({ id, panel, onFocusKeys }: { id: string; panel: Panel;
             {runs.length ? runs.map((r, j) => <span key={j} style={runStyle(r)}>{r.text}</span>) : ' '}
           </div>
         ))}
-      </pre>
+      </pre>}
       <div className="menu-keys">
         <button className="key" onClick={() => api.input(id, KEYS.up)} title="Up">↑</button>
         <button className="key" onClick={() => api.input(id, KEYS.down)} title="Down">↓</button>
@@ -100,6 +160,74 @@ export function TuiPanel({ id, panel, onFocusKeys }: { id: string; panel: Panel;
       </div>
     </div>
   )
+}
+
+const ICON: Record<string, string> = { ok: '✔', warn: '⚠', error: '✘', pending: '…', link: '→' }
+
+// Un bloque del panel. Los elementos de lista se eligen con clic (mueve el cursor) y doble clic (Enter).
+function PanelBlock({ b, cursor, onMove, onPick, onSearch }: { b: Block; cursor: boolean; onMove(): void; onPick(): void; onSearch(): void }) {
+  switch (b.kind) {
+    case 'heading':
+      return (
+        <h4 className="pui-heading">
+          {b.text}
+          {b.note && <span className="pui-muted"> {b.note}</span>}
+        </h4>
+      )
+    case 'text':
+      return <p className={`pui-text ${b.muted ? 'pui-muted' : ''}`}>{b.text}</p>
+    case 'pair':
+      return (
+        <div className="pui-pair">
+          <span>{b.left}</span>
+          <span className="pui-muted">{b.right}</span>
+        </div>
+      )
+    case 'kv':
+      return (
+        <div className="pui-kv">
+          <span className="pui-muted">{b.key}</span>
+          <span>{b.value}</span>
+        </div>
+      )
+    case 'bar':
+      return (
+        <div className="pui-bar">
+          <div className="pui-bar-top">
+            <span className="pui-bar-label">{b.label}</span>
+            <span className="pui-bar-pct">{b.text}</span>
+          </div>
+          <div className="pui-track">
+            <div className={`pui-fill ${b.pct >= 80 ? 'high' : b.pct >= 50 ? 'mid' : ''}`} style={{ width: `${b.pct}%` }} />
+          </div>
+          {b.note && <span className="pui-muted pui-small">{b.note}</span>}
+        </div>
+      )
+    case 'item':
+      return (
+        <div className={`pui-item ${cursor || b.cursor ? 'on' : ''}`} role="option" aria-selected={cursor || b.cursor} onClick={onMove} onDoubleClick={onPick}>
+          {b.icon && <span className={`pui-icon ${b.icon}`}>{ICON[b.icon]}</span>}
+          <span className="pui-name">{b.name}</span>
+          {b.on !== undefined ? (
+            <span className={`pui-toggle ${b.on ? 'on' : ''}`}>{b.on ? 'On' : 'Off'}</span>
+          ) : (
+            b.value && <span className="pui-value">{b.value}</span>
+          )}
+        </div>
+      )
+    case 'search':
+      return (
+        <div className="pui-search" onClick={onSearch} title="Type in the box below to search">
+          ⌕ {b.text}
+        </div>
+      )
+    case 'more':
+      return <div className="pui-more pui-muted">{b.text} · use ↓ to see them</div>
+    case 'art':
+      return <pre className="pui-art">{b.lines.join('\n')}</pre>
+    case 'gap':
+      return <div className="pui-gap" />
+  }
 }
 
 // Columna de terminal bajo el mouse: el panel usa una fuente monoespaciada, así que alcanza con el ancho de un

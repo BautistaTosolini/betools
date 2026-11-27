@@ -53,7 +53,9 @@ Los pedidos de permiso, las preguntas de Claude (AskUserQuestion) y los formular
 
 ### Paneles de Claude Code
 
-`/config`, `/usage`, `/model`, `/mcp`, `/permissions`, `/resume` y el resto de los paneles de la CLI se dibujan en Rendered. Se navegan con clic o con el teclado, y cada atajo tiene su botón.
+`/config`, `/usage`, `/model`, `/mcp`, `/permissions`, `/resume` y el resto de los paneles de la CLI se muestran en Rendered como interfaz: pestañas, buscador, ajustes con su estado On/Off, barras de uso, datos y listas con el estado de cada elemento. Se navegan con clic (doble clic elige) o con el teclado, y cada atajo tiene su botón. **Terminal view** muestra el panel tal como lo dibuja Claude Code.
+
+El zoom arranca en 110 % para la ventana y 90 % para el chat; Ctrl+0 y Ctrl+Shift+0 vuelven a esos valores.
 
 ![Panel /config en Rendered](docs/screenshots/panel.png)
 
