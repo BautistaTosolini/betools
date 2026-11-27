@@ -1,6 +1,6 @@
 {
   "name": "betools",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "private": true,
   "description": "Claude Code sessions in one window",
   "main": "out/main/index.js",

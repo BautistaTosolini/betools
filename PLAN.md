@@ -298,6 +298,10 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.18.2 — Sin botones CLI y Stop en Rendered
+
+- Se sacan los botones CLI y Stop del pie del chat: Esc detiene a Claude y la pestaña CLI abre la terminal.
+
 ## v0.18.1 — Título en claude --resume y confirmaciones propias
 
 - El título de la barra lateral se escribe en el historial de Claude con las mismas líneas que /rename
