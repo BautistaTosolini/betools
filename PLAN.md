@@ -298,6 +298,17 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.20.1 — Traspaso en cola y con estado visible
+
+- "Continue in new session" no bloquea: el diálogo se cierra y el traspaso sigue en segundo plano. Si Claude
+  está ocupado queda en cola hasta que termine (si no está abierto, se levanta). Estado en la sesión ("Handoff
+  queued" / "Writing handoff" / error) y en la barra lateral, con Cancel. Al terminar, si se sigue en la sesión
+  de origen, se abre la nueva. Fin del traspaso detectado aunque Claude responda entre dos lecturas del estado.
+- Diálogo rediseñado: de qué sesión sale, los tres pasos, campos con el estilo de la app, aviso de cola.
+- Paneles: una sola fila marcada (el cursor de la terminal manda).
+- Las pruebas e2e corren en una pantalla virtual (xvfb-run, 1920×1080) para no tomar el foco.
+- Pruebas: Vitest 506 y Playwright 48.
+
 ## v0.20.0 — Paneles de Claude Code como interfaz y zoom por defecto
 
 - Los paneles (/usage, /status, /config, /mcp, /hooks, /memory, /permissions, /stats…) se muestran como
