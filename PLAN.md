@@ -298,6 +298,14 @@ clawhip/
   misma ventana solo sube; se ignoran lecturas de una ventana ya vencida; una ventana nueva reemplaza.
 - Tokens del día: escaneo cada 10 s (antes 30 s).
 
+## v0.19.0 — Continuar en una sesión nueva
+
+- "Continue in new session…" en el menú de la sesión: se indica en qué va a trabajar la sesión nueva; la actual
+  responde con un traspaso enfocado en ese punto (sin herramientas ni secretos), betools lo guarda en
+  ~/.claude/handoffs/<id>.md y crea la sesión en el mismo directorio, que arranca con el traspaso como prompt
+  inicial (handoff.ts, HandoffDialog.tsx). Las variables de la carpeta se heredan; las propias de la sesión no.
+- Pruebas: Vitest 494 y Playwright 45.
+
 ## v0.18.2 — Sin botones CLI y Stop en Rendered
 
 - Se sacan los botones CLI y Stop del pie del chat: Esc detiene a Claude y la pestaña CLI abre la terminal.
