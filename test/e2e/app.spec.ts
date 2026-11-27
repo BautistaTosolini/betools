@@ -378,7 +378,7 @@ test.describe('Find (Ctrl+F)', () => {
       return { all: reg.get('find-match')?.size ?? 0, current: reg.get('find-current')?.toString() ? reg.get('find-current')!.size : 0 }
     })
 
-  test('Rendered: finds in the conversation, Enter moves, Esc closes without reaching Claude; not on the CLI tab', async () => {
+  test('Rendered: finds in the conversation (not in tool calls), Enter moves, Esc closes without reaching Claude; not on the CLI tab', async () => {
     ctx = await launch()
     const p = ctx.page
     await expect(p.locator('.msg.assistant')).toContainText('SELECT 1')
@@ -392,6 +392,13 @@ test.describe('Find (Ctrl+F)', () => {
     await p.keyboard.press('Shift+Enter')
     await expect(count(p)).toHaveText('1/2')
     await bar(p).locator('input').fill('no-such-text')
+    await expect(count(p)).toHaveText('No results')
+    // Las herramientas de Claude (comandos y resultados) no se buscan, aunque estén desplegadas.
+    await p.locator('.msg.tools summary').first().click()
+    await expect(p.locator('.msg.tools').first()).toContainText('nope.txt')
+    await bar(p).locator('input').fill('nope.txt')
+    await expect(count(p)).toHaveText('No results')
+    await bar(p).locator('input').fill('ls -la')
     await expect(count(p)).toHaveText('No results')
     // Ni Enter ni Esc del buscador llegan a Claude.
     await p.keyboard.press('Escape')

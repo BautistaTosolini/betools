@@ -2,8 +2,9 @@
 // visual. Las coincidencias se pintan con la API de resaltado de CSS (CSS.highlights + ::highlight()), que no
 // toca el DOM: no interfiere con React ni con ProseMirror.
 
-// Textos que no se buscan: el propio buscador y los campos de texto (el editor de fuente se busca aparte).
-const SKIP = '.find-bar, textarea, input, script, style'
+// Textos que no se buscan: el propio buscador, los campos de texto (el editor de fuente se busca aparte) y, en
+// la conversación, las herramientas que usó Claude (comandos, ediciones y sus resultados).
+const SKIP = '.find-bar, textarea, input, script, style, .msg.tools'
 
 // Rangos de cada coincidencia (sin distinguir mayúsculas). Una coincidencia puede cruzar elementos en línea
 // (`código`, **negrita**). Solo cuenta lo que se ve: el texto dentro de un bloque plegado no tiene cajas.
