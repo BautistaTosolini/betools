@@ -734,14 +734,6 @@ function Composer({ id, status, onOpenCli }: { id: string; status: SessionStatus
           )}
         </span>
         <span style={{ flex: 1 }} />
-        {working && !menu && (
-          <button className="btn-sm" title="Interrupt Claude (Esc)" onClick={() => api.input(id, KEYS.esc)}>
-            Stop
-          </button>
-        )}
-        <button className="btn-sm ghost" onClick={onOpenCli} title="Open the raw terminal">
-          CLI
-        </button>
         <button className="primary btn-sm" disabled={!text.trim() || off || !!panel} onClick={send}>
           Send
         </button>
