@@ -1,3 +1,4 @@
+import { ask } from './ConfirmDialog'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import { applyShortcut, shortcutFor } from '../md-shortcuts'
@@ -175,11 +176,11 @@ export function DocView({ path, cwd, visible, onOpenDoc }: { path: string; cwd: 
     }
   }
 
-  const done = () => {
+  const done = async () => {
     flushRich.current?.()
     const d = draftRef.current
     const dirty = !!d && d.text !== textRef.current
-    if (dirty && !window.confirm('Discard the unsaved changes to this file?')) return
+    if (dirty && !(await ask('Discard the unsaved changes to this file?', { ok: 'Discard', danger: true }))) return
     setDraft(null)
     setConflict(false)
   }

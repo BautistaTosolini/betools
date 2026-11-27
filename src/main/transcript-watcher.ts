@@ -37,6 +37,10 @@ export class TranscriptWatcher {
     return this.watched.get(id)?.parser.title() ?? null
   }
 
+  customTitle(id: string): string | null {
+    return this.watched.get(id)?.parser.custom() ?? null
+  }
+
   watch(session: Session): void {
     if (this.watched.has(session.id)) return
     // Sesión nueva: todavía no hay archivo; Claude lo va a crear en la ubicación esperada.

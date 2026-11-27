@@ -1,3 +1,4 @@
+import { ask } from './ConfirmDialog'
 import { useEffect, useState } from 'react'
 import type { EnvScope, EnvVarMeta } from '../../../shared/types'
 import { EnvEditor } from './EnvEditor'
@@ -34,7 +35,7 @@ export function EnvDialog({ title, scope, sessionId, children, onClose }: Props)
 
   const restart = async () => {
     if (!sessionId) return
-    if (!window.confirm('Restart the session to apply the variables?\n\nThe conversation resumes with --resume; if Claude was working, that task is interrupted.')) return
+    if (!(await ask('Restart the session to apply the variables?\n\nThe conversation resumes with --resume; if Claude was working, that task is interrupted.', { ok: 'Restart' }))) return
     await window.clawhip.restartSession(sessionId)
     setDirty(false)
     onClose()

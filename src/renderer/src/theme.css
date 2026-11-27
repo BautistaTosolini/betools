@@ -442,3 +442,10 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 0 4px; border: 1px sol
 .env-child-name { font-size: 12px; font-weight: 600; color: var(--text-2); padding: 4px 4px 0; }
 .env-overrides { color: var(--working); }
 .env-child-none { margin: 0; }
+
+/* Confirmaciones (ConfirmDialog): encima de cualquier otro diálogo. */
+.confirm-backdrop { z-index: 40; }
+.modal.confirm { width: min(460px, 92vw); }
+.modal.confirm h2 { font-size: 17px; line-height: 1.35; overflow-wrap: anywhere; }
+.confirm-detail { margin: 0; color: var(--text-2); white-space: pre-line; line-height: 1.5; overflow-wrap: anywhere; }
+button.danger.solid { background: var(--danger); border-color: var(--danger); color: #fff; }

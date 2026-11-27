@@ -19,7 +19,7 @@ Cada sesión corre el `claude` CLI real. Se conservan los slash commands, las sk
 
 - La barra lateral agrupa las sesiones por carpeta (un cliente o un proyecto, con su color) y muestra el estado de cada una: trabajando, necesita tu respuesta o terminó.
 - Cada sesión muestra su ticket de Jira como etiqueta, teñida con el color de la carpeta. El título sigue el formato `<TICKET> [<TICKET>…] <resumen>`; por ejemplo, `ACME-118 ACME-121 nightly ETL retries` muestra dos etiquetas y el resumen debajo. El primer ticket es el principal y aparece también en el encabezado de la sesión.
-- El título se edita con doble clic en la sesión, o se lee de `~/.claude/tab-titles/<id de sesión>` si un hook lo escribe ahí. Sin título, se usa el de `/rename` o el que genera Claude.
+- El título se edita con doble clic en la sesión, o se lee de `~/.claude/tab-titles/<id de sesión>` si un hook lo escribe ahí. Sin título, se usa el de `/rename` o el que genera Claude. betools escribe el título en el historial de Claude, como `/rename`, para que `claude --resume` muestre el mismo nombre; un `/rename` hecho en Claude actualiza la barra lateral.
 
 <img src="docs/screenshots/sidebar.png" alt="Barra lateral con carpetas, sesiones y sus tickets" width="320">
 

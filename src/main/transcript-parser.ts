@@ -74,6 +74,11 @@ export class TranscriptParser {
     if (i < this.changedFrom) this.changedFrom = i
   }
 
+  // Título puesto con /rename (o por betools), sin el generado por Claude.
+  custom(): string | null {
+    return this.customTitle
+  }
+
   // /rename gana sobre el título generado por Claude.
   title(): string | null {
     return this.customTitle ?? this.aiTitle

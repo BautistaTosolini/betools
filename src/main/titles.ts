@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync, unwatchFile, watchFile, writeFileSync 
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// Títulos "<TICKET> <resumen>" que guarda ~/.claude/hooks/warp-tab-title.sh en
+// Títulos "<TICKET> <resumen>" que guarda ~/.claude/hooks/session-title.sh en
 // ~/.claude/tab-titles/<session_id>. Es la convención de los CLAUDE.md de clientes;
 // clawhip la lee y, al renombrar desde la app, escribe el mismo archivo.
 const DIR = join(homedir(), '.claude', 'tab-titles')

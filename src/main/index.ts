@@ -13,6 +13,8 @@ import { SettingsStore } from './settings'
 import { discoverSessions } from './discover'
 import { migrateLegacyData } from './migrate'
 import { TabTitles } from './titles'
+import { writeResumeTitle } from './resume-title'
+import { findTranscript } from './claude-paths'
 import { DailyTokenCounter, StatusLineWatcher } from './usage'
 import { INTERRUPTED } from './transcript-parser'
 import { listSlashCommandsFull } from './slash-commands'
@@ -158,7 +160,7 @@ function envMoveTargets(scope: EnvScope): { scope: EnvScope; label: string }[] {
     if (!folder) return []
     return [{ scope: folder.scope, label: `folder ${store.get().folders.find((f) => f.id === folder.scope.id)?.name ?? ''}` }]
   }
-  return sessionsUsing(scope).map((s) => ({ scope: { kind: 'session', id: s.id }, label: `session ${s.name}` }))
+  return sessionsUsing(scope).map((s) => ({ scope: { kind: 'session', id: s.id }, label: `session ${displayTitle(s.id) ?? s.name}` }))
 }
 
 // Valida una referencia de AWS antes de guardarla (sin shell; perfil y región obligatorios donde aplica).
@@ -185,6 +187,41 @@ const labelOf = (s: Session) => displayTitle(s.id) ?? s.name
 const emitTitle = (id: string) => {
   send('session:title', id, displayTitle(id))
   updateTray()
+}
+
+// El título de betools va también al historial de Claude (como /rename), para que claude --resume muestre el
+// mismo nombre que la barra lateral. Se repite al salir Claude: si tenía otro nombre en memoria, lo reescribe.
+function syncResumeTitle(id: string): void {
+  const s = store.find(id)
+  const t = titles.get(id)
+  if (!s || !t) return
+  const file = findTranscript(s.cwd, id)
+  try {
+    if (file) writeResumeTitle(file, id, t)
+  } catch (e) {
+    console.error('resume title', id, e)
+  }
+}
+
+// /rename en Claude cambia también el título de betools. El que ya tenía el historial al empezar a seguir la
+// sesión no cuenta como cambio: no pisa el de betools (al revés, se le escribe el de betools).
+const seenCustom = new Map<string, string | null>()
+function onTranscriptTitle(id: string): void {
+  const c = watcher.customTitle(id)
+  const known = seenCustom.has(id)
+  const prev = seenCustom.get(id) ?? null
+  seenCustom.set(id, c)
+  if (known && c && c !== prev && c !== titles.get(id)) titles.set(id, c)
+  else syncResumeTitle(id)
+  emitTitle(id)
+}
+
+// Empieza a seguir el historial y el título de una sesión.
+function watchSession(s: Session): void {
+  watcher.watch(s)
+  titles.watch(s.id)
+  seenCustom.set(s.id, watcher.customTitle(s.id))
+  syncResumeTitle(s.id)
 }
 
 function assertDir(path: string): void {
@@ -372,14 +409,13 @@ function registerIpc(): void {
 
   const addSession = (session: Session): Session => {
     store.add(session)
-    watcher.watch(session)
-    titles.watch(session.id)
-    // Las sesiones importadas ya pueden tener título (Warp, /rename o ai-title): se avisa enseguida.
+    // Las sesiones importadas ya pueden tener título (session-title.sh, /rename o ai-title): se avisa enseguida.
+    watchSession(session)
     emitTitle(session.id)
     return session
   }
 
-  // title: "<TICKET> <resumen>" opcional; se guarda en ~/.claude/tab-titles como hace el script de Warp.
+  // title: "<TICKET> <resumen>" opcional; se guarda en ~/.claude/tab-titles (lo escribe también session-title.sh).
   ipcMain.handle('sessions:create', (_e, cwd: string, name: string, title?: string): Session => {
     assertDir(cwd)
     const now = new Date().toISOString()
@@ -503,6 +539,7 @@ function registerIpc(): void {
     shells.kill(SHELL_PREFIX + id)
     secrets.deleteScope({ kind: 'session', id })
     watcher.unwatch(id)
+    seenCustom.delete(id)
     titles.unwatch(id)
     status.forget(id)
     lines.forget(id)
@@ -621,6 +658,7 @@ app.whenReady().then(() => {
     onExit: (id, code) => {
       status.exited(id)
       send('pty:exit', id, code)
+      syncResumeTitle(id)
     },
     resolveEnv: (session) => resolveEnv(envLayers(session), secrets),
     // Nombre en claude.ai/el teléfono: el título de betools (ticket + resumen). Sin título, Claude lo nombra
@@ -639,7 +677,7 @@ app.whenReady().then(() => {
   )
   watcher = new TranscriptWatcher(
     (id, artifacts) => send('artifacts:changed', id, artifacts),
-    (id) => emitTitle(id),
+    (id) => onTranscriptTitle(id),
     (id) => send('session:meta', id, metaOf(id)),
     (id, start, items) => {
       send('conversation:changed', id, start, items)
@@ -649,11 +687,11 @@ app.whenReady().then(() => {
     }
   )
   daily = new DailyTokenCounter((t) => send('usage:daily', t))
-  titles = new TabTitles((id) => emitTitle(id))
-  for (const s of store.get().sessions) {
-    watcher.watch(s)
-    titles.watch(s.id)
-  }
+  titles = new TabTitles((id) => {
+    emitTitle(id)
+    syncResumeTitle(id)
+  })
+  for (const s of store.get().sessions) watchSession(s)
 
   registerIpc()
   createWindow()

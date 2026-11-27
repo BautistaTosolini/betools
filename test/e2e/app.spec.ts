@@ -147,6 +147,13 @@ test('starts a new session with --session-id when there is no transcript', async
   await expect.poll(() => events(ctx).find((e) => e.ev === 'start')?.args).toEqual(expect.arrayContaining(['--session-id', ctx.id]))
 })
 
+// Confirmación con la interfaz de betools (no la del sistema): comprueba el texto y acepta.
+async function confirmUi(p: Page, text: string | RegExp): Promise<void> {
+  const d = p.locator('.modal.confirm')
+  await expect(d).toContainText(text)
+  await d.locator('.actions button').last().click()
+}
+
 test.describe('Rendered: history from the transcript', () => {
   test('shows tools with their result, errors, edits, thinking and notices', async () => {
     ctx = await launch()
@@ -669,11 +676,23 @@ test.describe('Environment variables', () => {
     ctx = await launch({ folderEnv: { E2E_FOLDER: 'from-folder' }, sessionEnv: { E2E_SESSION: 'from-session' } })
     const p = ctx.page
     await expect.poll(() => starts(ctx).length).toBe(1)
-    p.on('dialog', (d) => d.accept())
+    // Ningún diálogo del sistema: las confirmaciones son de betools.
+    p.on('dialog', (d) => {
+      throw new Error(`native dialog: ${d.message()}`)
+    })
     await openSessionEnv(p)
 
     // Sesión → carpeta.
     await p.locator('.env-list:not(.inherited) li', { hasText: 'E2E_SESSION' }).locator('select.env-move').selectOption({ label: 'folder Client' })
+    // Encima del diálogo de variables; Esc cancela solo la confirmación.
+    await expect(p.locator('.modal.confirm h2')).toHaveText('Move E2E_SESSION to folder Client?')
+    await expect(p.locator('.modal.confirm button.primary')).toBeFocused()
+    await p.keyboard.press('Escape')
+    await expect(p.locator('.modal.confirm')).toHaveCount(0)
+    await expect(p.locator('.modal h2')).toContainText('Variables for')
+    expect(stored(ctx).sessions[0].env).toHaveLength(1)
+    await p.locator('.env-list:not(.inherited) li', { hasText: 'E2E_SESSION' }).locator('select.env-move').selectOption({ label: 'folder Client' })
+    await confirmUi(p, 'Every session in that folder will receive it.')
     await expect(p.locator('.env-list.inherited .env-name')).toHaveText(['E2E_FOLDER', 'E2E_SESSION'])
     await expect(p.locator('.env-list:not(.inherited) .empty')).toBeVisible()
     let st = stored(ctx)
@@ -684,6 +703,7 @@ test.describe('Environment variables', () => {
 
     // Carpeta → sesión ("Move here" en una heredada).
     await p.locator('.env-list.inherited li', { hasText: 'E2E_FOLDER' }).locator('button', { hasText: 'Move here' }).click()
+    await confirmUi(p, 'E2E_FOLDER')
     await expect(p.locator('.env-list:not(.inherited) .env-name')).toHaveText(['E2E_FOLDER'])
     await expect(p.locator('.env-list.inherited .env-name')).toHaveText(['E2E_SESSION'])
     st = stored(ctx)
@@ -726,12 +746,20 @@ test.describe('Environment variables', () => {
   test('the folder dialog also shows the own variables of each session in it', async () => {
     ctx = await launch({ folderEnv: { E2E_PROFILE: 'folder-profile' }, sessionEnv: { E2E_PROFILE: 'session-profile', E2E_ONLY_SESSION: 'x' } })
     const p = ctx.page
+    // Con ticket y resumen: el diálogo (y "Move to…") la nombra igual que la barra lateral.
+    await p.locator('.sidebar .session').dblclick()
+    await p.locator('.sidebar .session input').fill('ACME-7 deploy api')
+    await p.locator('.sidebar .session input').press('Enter')
+    await expect(p.locator('.sidebar .session .ticket')).toHaveText('ACME-7')
     await p.locator('.group-header', { hasText: 'Client' }).locator('.kebab-btn').click()
     await p.locator('.menu-item', { hasText: 'Environment variables…' }).click()
     await expect(p.locator('.modal h2')).toContainText('Variables for folder Client')
     await expect(p.locator('.modal .env-section')).toHaveText([/^This folder/, /^Sessions in this folder/])
     const child = p.locator('.env-child')
-    await expect(child.locator('.env-child-name')).toHaveText(['e2e'])
+    await expect(child.locator('.env-child-name')).toHaveText(['ACME-7 deploy api'])
+    await expect(p.locator('.env-list:not(.inherited) li', { hasText: 'E2E_PROFILE' }).first().locator('select.env-move option').nth(1)).toHaveText(
+      'session ACME-7 deploy api'
+    )
     await expect(child.locator('li', { hasText: 'E2E_PROFILE' })).toContainText('session-profile · overrides the folder')
     await expect(child.locator('li', { hasText: 'E2E_ONLY_SESSION' })).not.toContainText('overrides')
     if (process.env.E2E_SHOTS) await p.screenshot({ path: join(process.env.E2E_SHOTS, 'env-folder.png') })
@@ -740,16 +768,11 @@ test.describe('Environment variables', () => {
   test('asks before replacing a variable that already exists in the destination', async () => {
     ctx = await launch({ folderEnv: { E2E_DUP: 'folder-value' }, sessionEnv: { E2E_DUP: 'session-value' } })
     const p = ctx.page
-    const dialogs: string[] = []
-    p.on('dialog', (d) => {
-      dialogs.push(d.message())
-      d.accept()
-    })
     await openSessionEnv(p)
     await expect(p.locator('.env-list.inherited li', { hasText: 'E2E_DUP' })).toContainText('overridden by this session')
     await p.locator('.env-list:not(.inherited) li', { hasText: 'E2E_DUP' }).locator('select.env-move').selectOption({ label: 'folder Client' })
-    await expect.poll(() => dialogs.length).toBe(2)
-    expect(dialogs[1]).toContain('already has E2E_DUP')
+    await confirmUi(p, 'Move E2E_DUP to folder Client?')
+    await confirmUi(p, 'already has E2E_DUP')
     await expect(p.locator('.env-list:not(.inherited) .empty')).toBeVisible()
     expect(stored(ctx).folders[0].env).toMatchObject([{ name: 'E2E_DUP', source: { value: 'session-value' } }])
   })
@@ -757,12 +780,12 @@ test.describe('Environment variables', () => {
   test('the folder dialog moves a variable to one of its sessions', async () => {
     ctx = await launch({ folderEnv: { E2E_FOLDER: 'from-folder' } })
     const p = ctx.page
-    p.on('dialog', (d) => d.accept())
     const group = p.locator('.sidebar .kebab-btn[title="Folder actions"]')
     await group.click({ force: true })
     await p.locator('.menu-item', { hasText: 'Environment variables…' }).click()
     await expect(p.locator('.modal h2')).toHaveText('Variables for folder Client')
     await p.locator('.env-list li', { hasText: 'E2E_FOLDER' }).locator('select.env-move').selectOption({ label: 'session e2e' })
+    await confirmUi(p, 'Move E2E_FOLDER to session e2e?')
     await expect(p.locator('.env-list .empty')).toBeVisible()
     expect(stored(ctx).sessions[0].env).toMatchObject([{ name: 'E2E_FOLDER' }])
   })
@@ -997,4 +1020,34 @@ test.describe('Markdown viewer: editing', () => {
 test('a closed session file is not left behind in the real HOME', () => {
   // Salvaguarda: las pruebas nunca escriben en el ~/.claude real.
   expect(existsSync(join(process.env.HOME ?? '', '.claude', 'projects', 'betools-e2e'))).toBe(false)
+})
+
+test.describe('Session title and claude --resume', () => {
+  test('the sidebar title is written to the history like /rename, and a /rename in Claude updates the sidebar', async () => {
+    ctx = await launch({})
+    const p = ctx.page
+    const file = join(ctx.home, '.claude', 'projects', ctx.cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${ctx.id}.jsonl`)
+    const titlesIn = () =>
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((l) => l.includes('"custom-title"'))
+        .map((l) => JSON.parse(l).customTitle)
+    await p.locator('.sidebar .session').dblclick()
+    await p.locator('.sidebar .session input').fill('ACME-7 deploy api')
+    await p.locator('.sidebar .session input').press('Enter')
+    await expect.poll(titlesIn).toEqual(['ACME-7 deploy api'])
+    expect(readFileSync(file, 'utf8')).toContain(`{"type":"agent-name","agentName":"ACME-7 deploy api","sessionId":"${ctx.id}"}`)
+
+    // /rename en Claude: la barra lateral toma el nuevo nombre y no se vuelve a escribir el anterior.
+    writeFileSync(file, JSON.stringify({ type: 'custom-title', customTitle: 'ACME-9 rotate certs', sessionId: ctx.id }) + '\n', { flag: 'a' })
+    await expect(p.locator('.sidebar .session .ticket')).toHaveText('ACME-9', { timeout: 10_000 })
+    await expect(p.locator('.sidebar .session .summary')).toHaveText('rotate certs')
+    expect(titlesIn()).toEqual(['ACME-7 deploy api', 'ACME-9 rotate certs'])
+
+    // Cerrar la sesión pide confirmación con la interfaz de betools, nombrándola como en la barra lateral.
+    await p.locator('.sidebar .session .close').click({ force: true })
+    await expect(p.locator('.modal.confirm h2')).toHaveText('Close the session "ACME-9 rotate certs"?')
+    await p.locator('.modal.confirm button', { hasText: 'Cancel' }).click()
+    await expect(p.locator('.sidebar .session')).toHaveCount(1)
+  })
 })

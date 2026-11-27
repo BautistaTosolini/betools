@@ -21,6 +21,7 @@ import { CommandsDialog } from './components/CommandsDialog'
 import type { EnvScope } from '../../shared/types'
 import type { DiscoveredSession } from '../../shared/types'
 import { FolderDialog } from './components/FolderDialog'
+import { ask, ConfirmHost } from './components/ConfirmDialog'
 import { folderFor, groupSessions, NO_FOLDER_COLOR, sessionLabel, textOn } from './grouping'
 
 const api = window.clawhip
@@ -306,8 +307,10 @@ export function App() {
   const close = async (id: string) => {
     const s = sessions.find((x) => x.id === id)
     if (!s) return
-    const ok = window.confirm(
-      `Close the session "${titles[id] ?? s.name}"?\n\nThe process stops and the session leaves the list. Claude's history is not deleted; you can resume it with claude --resume ${s.id}.`
+    const l = sessionLabel(titles[id], s.name)
+    const ok = await ask(
+      `Close the session "${[...l.tickets, l.summary ?? s.name].join(' ')}"?\n\nThe process stops and the session leaves the list. Claude's history is not deleted; you can resume it with claude --resume ${s.id}.`,
+      { ok: 'Close session', danger: true }
     )
     if (!ok) return
     await api.closeSession(id)
@@ -398,7 +401,7 @@ export function App() {
               })
             }
             onDeleteFolder={async (f) => {
-              if (!window.confirm(`Delete the folder "${f.name}"?\n\nIts sessions stay open and move to "No folder".`)) return
+              if (!(await ask(`Delete the folder "${f.name}"?\n\nIts sessions stay open and move to "No folder".`, { ok: 'Delete folder', danger: true }))) return
               await api.deleteFolder(f.id)
               if (focusId === f.id) setFocusId(null)
               await refresh()
@@ -467,8 +470,8 @@ export function App() {
                   },
                   {
                     label: 'Restart session',
-                    onClick: () => {
-                      if (window.confirm('Restart the session?\n\nIt resumes with --resume; if Claude was working, that task is interrupted.'))
+                    onClick: async () => {
+                      if (await ask('Restart the session?\n\nIt resumes with --resume; if Claude was working, that task is interrupted.', { ok: 'Restart' }))
                         api.restartSession(selected.id)
                     }
                   },
@@ -635,6 +638,7 @@ export function App() {
           onCancel={() => setFolderEdit(undefined)}
         />
       )}
+      <ConfirmHost />
     </div>
   )
 }

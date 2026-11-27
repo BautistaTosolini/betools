@@ -1,3 +1,4 @@
+import { ask } from './ConfirmDialog'
 import { useEffect, useState } from 'react'
 import type { Folder, FolderSuggestion } from '../../../shared/types'
 import { PALETTE } from '../grouping'
@@ -142,8 +143,8 @@ export function FolderDialog({ folder, usedColors, onSave, onDelete, onCancel }:
           {onDelete && (
             <button
               className="danger"
-              onClick={() => {
-                if (window.confirm(`Delete the folder "${folder?.name}"?\n\nIts sessions stay open and move to "No folder".`)) onDelete()
+              onClick={async () => {
+                if (await ask(`Delete the folder "${folder?.name}"?\n\nIts sessions stay open and move to "No folder".`, { ok: 'Delete folder', danger: true })) onDelete()
               }}
             >
               Delete folder

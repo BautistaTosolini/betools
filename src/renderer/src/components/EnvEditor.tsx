@@ -1,3 +1,4 @@
+import { ask } from './ConfirmDialog'
 import { useEffect, useState } from 'react'
 import type { EnvScope, EnvSource, EnvVarMeta } from '../../../shared/types'
 
@@ -233,7 +234,7 @@ export function EnvEditor({ scope, inherited, sessions, onChange }: Props) {
   }
 
   const remove = async (v: EnvVarMeta) => {
-    if (!window.confirm(`Delete the variable ${v.name}?${v.source.kind === 'local' ? '\n\nThe encrypted value is removed.' : ''}`)) return
+    if (!(await ask(`Delete the variable ${v.name}?${v.source.kind === 'local' ? '\n\nThe encrypted value is removed.' : ''}`, { ok: 'Delete', danger: true }))) return
     try {
       await api.deleteEnv(scope, v.name)
       await done()
@@ -244,14 +245,14 @@ export function EnvEditor({ scope, inherited, sessions, onChange }: Props) {
 
   // Mueve una variable entre la sesión y su carpeta. Si el destino ya la tiene, ofrece reemplazarla.
   const move = async (from: EnvScope, to: EnvScope, toLabel: string, v: EnvVarMeta, warn = '') => {
-    if (!window.confirm(`Move ${v.name} to ${toLabel}?${warn}`)) return
+    if (!(await ask(`Move ${v.name} to ${toLabel}?${warn}`, { ok: 'Move' }))) return
     setError(null)
     try {
       try {
         await api.moveEnv(from, to, v.name)
       } catch (e) {
         if (!errMsg(e).startsWith('EXISTS:')) throw e
-        if (!window.confirm(`${toLabel} already has ${v.name}. Replace it with this one?`)) return
+        if (!(await ask(`${toLabel} already has ${v.name}. Replace it with this one?`, { ok: 'Replace', danger: true }))) return
         await api.moveEnv(from, to, v.name, true)
       }
       await done()
